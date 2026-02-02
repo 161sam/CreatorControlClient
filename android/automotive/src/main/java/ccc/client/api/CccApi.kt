@@ -1,6 +1,9 @@
 package ccc.client.api
 
+import okhttp3.RequestBody
+import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.POST
 import retrofit2.http.Path
 
 interface CccApi {
@@ -21,4 +24,10 @@ interface CccApi {
 
     @GET("/api/v1/commands/{name}")
     suspend fun command(@Path("name") name: String): CommandMeta
+
+    @POST("/api/v1/commands/exec")
+    suspend fun execCommand(@Body request: ExecCommandRequest): ExecCommandResponse
+
+    @POST("/api/v1/commands/exec")
+    suspend fun execCommandRaw(@Body body: RequestBody): ExecCommandResponse
 }

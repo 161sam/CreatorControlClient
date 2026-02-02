@@ -218,7 +218,18 @@ endpoints and surface the error in the UI.
 
 The Android browser screen shows `/api/v1/capabilities` and `/api/v1/commands`
 metadata, with command detail fetched from `/api/v1/commands/{name}`, plus a
-"Copy browser diagnostics" button to share the current payloads.
+"Copy browser diagnostics" button to share the current payloads. Command detail
+now supports **Run**, renders an arguments form from `args_schema`, and offers a
+Raw JSON mode for fallback payloads.
+
+Command exec example:
+
+```bash
+curl -H "Authorization: Bearer ${CCC_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"command":"open_new_doc","args":{}}' \
+  http://127.0.0.1:4828/api/v1/commands/exec
+```
 
 ### Android ↔ Server (USB, recommended)
 
