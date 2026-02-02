@@ -157,6 +157,9 @@ curl -H "Authorization: Bearer ${CCC_TOKEN}" \
 
 curl -H "Authorization: Bearer ${CCC_TOKEN}" \
   http://127.0.0.1:4828/api/v1/commands
+
+curl -H "Authorization: Bearer ${CCC_TOKEN}" \
+  http://127.0.0.1:4828/api/v1/commands/open_new_doc
 ```
 
 These endpoints are used by the Android app as a command/model browser across CAD
@@ -212,6 +215,10 @@ The Android start screen displays `/api/v1/healthz`, `/api/v1/version`, and
 `/api/v1/info` results plus a "Copy diagnostics" button for bug reports. If
 `CCC_TOKEN` is empty, the app will receive 401 responses for protected
 endpoints and surface the error in the UI.
+
+The Android browser screen shows `/api/v1/capabilities` and `/api/v1/commands`
+metadata, with command detail fetched from `/api/v1/commands/{name}`, plus a
+"Copy browser diagnostics" button to share the current payloads.
 
 ### Android ↔ Server (USB, recommended)
 
