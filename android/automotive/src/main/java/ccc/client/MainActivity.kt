@@ -19,12 +19,19 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         val tv = TextView(this).apply {
-            text = "Connecting…"
+            text = "Connecting… (mode=${AppConfig.mode})"
             setTextColor(Color.GRAY)
             textSize = 18f
             setPadding(32, 32, 32, 32)
         }
         setContentView(tv)
+
+        if (AppConfig.token.isNotBlank()) {
+            ApiClient.setToken(AppConfig.token)
+            Log.i(tag, "auth enabled")
+        } else {
+            Log.i(tag, "auth disabled")
+        }
 
         lifecycleScope.launch {
             try {

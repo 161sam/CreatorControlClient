@@ -16,6 +16,7 @@ android {
 
         buildConfigField("String", "CCC_BASE_URL", "\"http://127.0.0.1:4828/\"")
         buildConfigField("String", "CCC_MODE", "\"usb\"")
+        buildConfigField("String", "CCC_TOKEN", "\"\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -158,19 +158,26 @@ To switch between USB reverse and LAN, update the build config fields in
 ```kotlin
 buildConfigField("String", "CCC_BASE_URL", "\"http://127.0.0.1:4828/\"")
 buildConfigField("String", "CCC_MODE", "\"usb\"")
+buildConfigField("String", "CCC_TOKEN", "\"\"")
 ```
 
 **USB reverse (recommended):**
 
 * `CCC_BASE_URL`: `http://127.0.0.1:4828/`
 * `CCC_MODE`: `usb`
+* `CCC_TOKEN`: (optional, required for current `/api/v1/healthz`)
 
 **LAN mode (device → PC over WiFi):**
 
 * `CCC_BASE_URL`: `http://<YOUR_PC_IP>:4828/`
 * `CCC_MODE`: `lan`
+* `CCC_TOKEN`: (optional, required for current `/api/v1/healthz`)
 
 Note: the base URL must include the trailing `/` (Retrofit requirement).
+
+For local debug builds, set `CCC_TOKEN` in your local
+`android/automotive/build.gradle.kts` (use a dev token only; do not commit
+real tokens).
 
 ### Android ↔ Server (USB, recommended)
 
