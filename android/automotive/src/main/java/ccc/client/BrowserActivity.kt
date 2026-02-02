@@ -27,9 +27,11 @@ import ccc.client.api.ArgSpec
 import ccc.client.api.CapabilitiesResponse
 import ccc.client.api.CommandMeta
 import ccc.client.api.CommandsResponse
+import ccc.client.api.ExportResponse
 import ccc.client.api.ExecCommandRequest
 import ccc.client.api.ExecCommandResponse
 import ccc.client.api.UploadResponse
+import ccc.client.api.parseExportResponse
 import ccc.client.api.parseArgsSchema
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
@@ -46,6 +48,8 @@ import retrofit2.HttpException
 import okio.Buffer
 import okio.BufferedSink
 import okio.source
+import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
 import java.text.NumberFormat
 import java.time.ZonedDateTime
@@ -56,6 +60,8 @@ class BrowserActivity : AppCompatActivity() {
     private var execJob: Job? = null
     private var uploadJob: Job? = null
     private var importJob: Job? = null
+    private var exportJob: Job? = null
+    private var downloadJob: Job? = null
     private lateinit var pickFileLauncher: ActivityResultLauncher<Array<String>>
     private var currentSection: Section = Section.CAPABILITIES
     private var capabilities: CapabilitiesResponse? = null
@@ -74,6 +80,11 @@ class BrowserActivity : AppCompatActivity() {
     private var lastImportRequestPayload: String? = null
     private var lastImportResponsePayload: String? = null
     private var lastImportHttpStatus: String? = null
+    private var lastExportRequestPayload: String? = null
+    private var lastExportResponsePayload: String? = null
+    private var lastExportHttpStatus: String? = null
+    private var lastExportResponse: ExportResponse? = null
+    private var lastExportDownloadStatus: String? = null
 
     private val moshi: Moshi by lazy {
         Moshi.Builder()
@@ -85,6 +96,7 @@ class BrowserActivity : AppCompatActivity() {
     private val commandAdapter by lazy { moshi.adapter(CommandMeta::class.java) }
     private val execResponseAdapter by lazy { moshi.adapter(ExecCommandResponse::class.java) }
     private val uploadResponseAdapter by lazy { moshi.adapter(UploadResponse::class.java) }
+    private val exportResponseAdapter by lazy { moshi.adapter(ExportResponse::class.java) }
     private val mapAdapter by lazy {
         val type = Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java)
         moshi.adapter<Map<String, Any?>>(type)
@@ -170,6 +182,56 @@ class BrowserActivity : AppCompatActivity() {
             addView(uploadStatusView)
             addView(importButton)
             addView(importStatusView)
+        }
+        val exportsTitle = TextView(this).apply {
+            text = "Exports"
+            textSize = 16f
+            setTextColor(Color.BLACK)
+            setPadding(0, 16, 0, 8)
+        }
+        val exportStlButton = Button(this).apply {
+            text = "Export STL"
+        }
+        val exportStepButton = Button(this).apply {
+            text = "Export STEP"
+        }
+        val exportButtonRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(exportStlButton)
+            addView(exportStepButton)
+        }
+        val exportStatusView = TextView(this).apply {
+            textSize = 14f
+            setTextColor(Color.BLACK)
+            setPadding(0, 0, 0, 8)
+            text = "No export requested yet."
+        }
+        val exportResultView = TextView(this).apply {
+            textSize = 13f
+            setTextColor(Color.DKGRAY)
+            typeface = Typeface.MONOSPACE
+            setPadding(0, 0, 0, 8)
+        }
+        val exportDownloadButton = Button(this).apply {
+            text = "Download"
+            isEnabled = false
+        }
+        val exportCopyLinkButton = Button(this).apply {
+            text = "Copy link"
+            isEnabled = false
+        }
+        val exportActionsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(exportDownloadButton)
+            addView(exportCopyLinkButton)
+        }
+        val exportsContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(exportsTitle)
+            addView(exportButtonRow)
+            addView(exportStatusView)
+            addView(exportResultView)
+            addView(exportActionsRow)
         }
         pickFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
@@ -333,6 +395,7 @@ class BrowserActivity : AppCompatActivity() {
             addView(detailsView)
             addView(messageView)
             addView(filesContainer)
+            addView(exportsContainer)
             addView(buttonRow)
             addView(sectionRow)
             addView(scrollView)
@@ -370,6 +433,18 @@ class BrowserActivity : AppCompatActivity() {
         }
         importButton.setOnClickListener {
             importUploadedFile(importStatusView, importButton)
+        }
+        exportStlButton.setOnClickListener {
+            requestExport("stl", exportStatusView, exportResultView, exportDownloadButton, exportCopyLinkButton)
+        }
+        exportStepButton.setOnClickListener {
+            requestExport("step", exportStatusView, exportResultView, exportDownloadButton, exportCopyLinkButton)
+        }
+        exportDownloadButton.setOnClickListener {
+            downloadExport(exportStatusView)
+        }
+        exportCopyLinkButton.setOnClickListener {
+            copyExportLink()
         }
         capabilitiesButton.setOnClickListener {
             currentSection = Section.CAPABILITIES
@@ -717,6 +792,120 @@ class BrowserActivity : AppCompatActivity() {
         }
     }
 
+    private fun requestExport(
+        format: String,
+        exportStatusView: TextView,
+        exportResultView: TextView,
+        downloadButton: Button,
+        copyLinkButton: Button
+    ) {
+        if (exportJob?.isActive == true) {
+            return
+        }
+        val args = mapOf("format" to format)
+        lastExportRequestPayload = toPrettyJson(mapOf("command" to "export_current_doc", "args" to args))
+        lastExportResponsePayload = null
+        lastExportHttpStatus = null
+        lastExportResponse = null
+        lastExportDownloadStatus = null
+        exportStatusView.text = "Exporting…"
+        exportResultView.text = ""
+        downloadButton.isEnabled = false
+        copyLinkButton.isEnabled = false
+        exportJob = lifecycleScope.launch {
+            try {
+                val execResponse = withContext(Dispatchers.IO) {
+                    ApiClient.api.execCommand(ExecCommandRequest("export_current_doc", args))
+                }
+                lastExportHttpStatus = "HTTP 200"
+                val exportResponse = parseExportResponse(execResponse.result, exportResponseAdapter)
+                lastExportResponse = exportResponse
+                lastExportResponsePayload = if (exportResponse != null) {
+                    exportResponseAdapter.toJson(exportResponse)
+                } else {
+                    execResponseAdapter.toJson(execResponse)
+                }
+                exportStatusView.text = buildExportStatusText(execResponse, exportResponse)
+                exportResultView.text = exportResponse?.let { formatExportDetails(it) } ?: "No export payload returned."
+                val hasDownload = !exportResponse?.downloadUrl.isNullOrBlank()
+                downloadButton.isEnabled = hasDownload
+                copyLinkButton.isEnabled = hasDownload
+            } catch (e: Exception) {
+                val httpException = e as? HttpException
+                val rawBody = httpException?.response()?.errorBody()?.string()
+                val errorMessage = if (httpException != null) {
+                    val bodyText = rawBody?.takeIf { it.isNotBlank() } ?: "<no body>"
+                    "HTTP ${httpException.code()}: ${truncate(bodyText, 200)}"
+                } else {
+                    val message = e.message ?: "unknown error"
+                    "${e.javaClass.simpleName}: $message"
+                }
+                lastExportHttpStatus = if (httpException != null) "HTTP ${httpException.code()}" else "error"
+                lastExportResponsePayload = rawBody ?: errorMessage
+                exportStatusView.text = "Export failed: $errorMessage"
+                exportResultView.text = ""
+            } finally {
+                exportJob = null
+            }
+        }
+    }
+
+    private fun downloadExport(exportStatusView: TextView) {
+        if (downloadJob?.isActive == true) {
+            return
+        }
+        val export = lastExportResponse
+        val downloadUrl = export?.downloadUrl
+        if (export == null || downloadUrl.isNullOrBlank()) {
+            Toast.makeText(this, "Export a file before downloading.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        exportStatusView.text = "Downloading…"
+        lastExportDownloadStatus = null
+        downloadJob = lifecycleScope.launch {
+            try {
+                val savedFile = withContext(Dispatchers.IO) {
+                    ApiClient.downloadExport(downloadUrl).use { response ->
+                        if (!response.isSuccessful) {
+                            throw IOException("HTTP ${response.code}")
+                        }
+                        val body = response.body ?: throw IOException("empty response body")
+                        val targetDir = getExternalFilesDir(null) ?: cacheDir
+                        val safeName = sanitizeFileName(export.filename ?: "export.bin")
+                        val output = File(targetDir, safeName)
+                        body.byteStream().use { input ->
+                            FileOutputStream(output).use { outputStream ->
+                                input.copyTo(outputStream)
+                            }
+                        }
+                        output
+                    }
+                }
+                lastExportDownloadStatus = "saved=${savedFile.absolutePath}"
+                exportStatusView.text = "Download saved: ${savedFile.absolutePath}"
+            } catch (e: Exception) {
+                val message = e.message ?: "unknown error"
+                lastExportDownloadStatus = "error=${e.javaClass.simpleName}: $message"
+                exportStatusView.text = "Download failed: ${e.javaClass.simpleName}: $message"
+            } finally {
+                downloadJob = null
+            }
+        }
+    }
+
+    private fun copyExportLink() {
+        val export = lastExportResponse
+        val downloadUrl = export?.downloadUrl
+        if (downloadUrl.isNullOrBlank()) {
+            Toast.makeText(this, "No export link available.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val fullUrl = buildAbsoluteUrl(downloadUrl)
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        clipboard.setPrimaryClip(ClipData.newPlainText("CCC Export Link", fullUrl))
+        Toast.makeText(this, "Export link copied to clipboard", Toast.LENGTH_SHORT).show()
+    }
+
     private fun buildFileStatusText(file: SelectedFileInfo): String {
         val sizeText = file.size?.let { NumberFormat.getInstance().format(it) + " bytes" } ?: "unknown size"
         val mimeText = file.mime ?: "unknown mime"
@@ -741,12 +930,49 @@ class BrowserActivity : AppCompatActivity() {
         return "Import $status\n$resultText"
     }
 
+    private fun buildExportStatusText(response: ExecCommandResponse, export: ExportResponse?): String {
+        val okText = when {
+            export?.ok == true -> "ok"
+            response.ok == true -> "ok"
+            response.status?.isNotBlank() == true -> response.status
+            else -> "error"
+        }
+        val filename = export?.filename ?: "<unknown>"
+        val sizeText = export?.size?.let { NumberFormat.getInstance().format(it) } ?: "<unknown>"
+        return "Export $okText: $filename (${sizeText} bytes)"
+    }
+
+    private fun formatExportDetails(export: ExportResponse): String {
+        val sizeText = export.size?.let { NumberFormat.getInstance().format(it) } ?: "<unknown>"
+        return buildString {
+            appendLine("format: ${export.format ?: "<unknown>"}")
+            appendLine("filename: ${export.filename ?: "<unknown>"}")
+            appendLine("size: ${sizeText} bytes")
+            appendLine("created_utc: ${export.createdUtc ?: "<unknown>"}")
+            appendLine("download_url: ${export.downloadUrl ?: "<unknown>"}")
+        }
+    }
+
     private fun inferFormat(name: String): String? {
         val ext = name.substringAfterLast('.', "").lowercase()
         return when (ext) {
             "stp" -> "step"
             "step", "stl", "obj", "iges", "fcstd" -> ext
             else -> null
+        }
+    }
+
+    private fun sanitizeFileName(name: String): String {
+        val trimmed = name.trim()
+        val cleaned = trimmed.replace("/", "_").replace("\\", "_")
+        return if (cleaned.isBlank()) "export.bin" else cleaned
+    }
+
+    private fun buildAbsoluteUrl(path: String): String {
+        return if (path.startsWith("http://") || path.startsWith("https://")) {
+            path
+        } else {
+            AppConfig.baseUrl.trimEnd('/') + path
         }
     }
 
@@ -1144,6 +1370,11 @@ class BrowserActivity : AppCompatActivity() {
         val importRequest = lastImportRequestPayload?.let { redactToken(it) } ?: "<none>"
         val importResponse = lastImportResponsePayload ?: "<none>"
         val importStatus = lastImportHttpStatus ?: "<none>"
+        val exportRequest = lastExportRequestPayload?.let { redactToken(it) } ?: "<none>"
+        val exportResponse = lastExportResponsePayload ?: "<none>"
+        val exportStatus = lastExportHttpStatus ?: "<none>"
+        val exportDownloadStatus = lastExportDownloadStatus ?: "<none>"
+        val exportSummary = lastExportResponse?.let { formatExportDetails(it).trim() } ?: "<none>"
         val fileSummary = selectedFile?.let { buildFileStatusText(it) } ?: "<none>"
         val messageText = messageView.text?.toString()?.trim().orEmpty()
         return buildString {
@@ -1195,6 +1426,15 @@ class BrowserActivity : AppCompatActivity() {
             appendLine("  ${truncateJson(importRequest, 2000).replace("\n", "\n  ")}")
             appendLine("import_response:")
             appendLine("  ${truncateJson(importResponse, 2000).replace("\n", "\n  ")}")
+            appendLine()
+            appendLine("export_status: $exportStatus")
+            appendLine("export_request:")
+            appendLine("  ${truncateJson(exportRequest, 2000).replace("\n", "\n  ")}")
+            appendLine("export_response:")
+            appendLine("  ${truncateJson(exportResponse, 2000).replace("\n", "\n  ")}")
+            appendLine("export_download_status: $exportDownloadStatus")
+            appendLine("export_summary:")
+            appendLine("  ${exportSummary.replace("\n", "\n  ")}")
         }
     }
 

@@ -28,3 +28,14 @@ class FreeCADRunner:
         args = [self.freecad_cmd, script, "--input", path, "--format", fmt]
         subprocess.run(args, check=True, capture_output=True, text=True)
         return {"import_id": "imp_ok", "document": into_document or "headless", "imported_objects": 1}
+
+    def export_current_doc(self, path: str, fmt: str) -> None:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if fmt == "stl":
+            payload = "solid ccc\nendsolid ccc\n"
+        elif fmt == "step":
+            payload = "ISO-10303-21;\nEND-ISO-10303-21;\n"
+        else:
+            payload = f"unsupported export format: {fmt}\n"
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(payload)

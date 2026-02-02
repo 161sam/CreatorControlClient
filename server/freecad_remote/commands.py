@@ -1,8 +1,10 @@
 import os
+import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from .runner import FreeCADRunner
-from .files import get_file_path
+from .files import build_export_path, get_file_path, register_export, sanitize_filename
 from .settings import settings
 
 _COMMANDS: dict[str, dict[str, Any]] = {
@@ -56,6 +58,21 @@ _COMMANDS: dict[str, dict[str, Any]] = {
         },
         "returns": "import_result",
         "tags": ["file", "import"],
+    },
+    "export_current_doc": {
+        "name": "export_current_doc",
+        "description": "Export current document to STL/STEP and return download url.",
+        "args_schema": {
+            "type": "object",
+            "properties": {
+                "format": {"type": "string", "enum": ["stl", "step"]},
+                "filename": {"type": "string"},
+            },
+            "required": ["format"],
+            "additionalProperties": False,
+        },
+        "returns": "export_response",
+        "tags": ["export", "file"],
     },
 }
 
@@ -124,6 +141,38 @@ def exec_command(runner: FreeCADRunner, command: str, args: dict[str, Any]) -> d
                 "detail": str(exc),
                 "path": path,
                 "format": fmt,
+            }
+    if command == "export_current_doc":
+        fmt = (args.get("format") or "").lower()
+        if fmt not in {"stl", "step"}:
+            return {"status": "error", "error": "format_required", "format": fmt}
+        export_id = uuid.uuid4().hex
+        filename = sanitize_filename(args.get("filename") or f"export_{export_id}.{fmt}")
+        export_path = build_export_path(settings.export_dir, export_id, filename)
+        try:
+            runner.export_current_doc(export_path, fmt)
+            size = os.path.getsize(export_path) if os.path.isfile(export_path) else 0
+            created_utc = datetime.now(timezone.utc).isoformat()
+            download_url = f"/api/v1/exports/{export_id}/download"
+            payload = {
+                "ok": True,
+                "export_id": export_id,
+                "format": fmt,
+                "filename": filename,
+                "path": export_path,
+                "download_url": download_url,
+                "size": size,
+                "created_utc": created_utc,
+            }
+            register_export(export_id, payload)
+            return payload
+        except Exception as exc:
+            return {
+                "status": "error",
+                "error": "export_failed",
+                "detail": str(exc),
+                "format": fmt,
+                "path": export_path,
             }
 
     return {"message": "ok"}

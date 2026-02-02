@@ -84,6 +84,20 @@ data class ExecCommandResponse(
     val result: Any?
 )
 
+data class ExportResponse(
+    val ok: Boolean?,
+    @Json(name = "export_id")
+    val exportId: String?,
+    val format: String?,
+    val filename: String?,
+    val path: String?,
+    @Json(name = "download_url")
+    val downloadUrl: String?,
+    val size: Long?,
+    @Json(name = "created_utc")
+    val createdUtc: String?
+)
+
 data class UploadResponse(
     val ok: Boolean?,
     @Json(name = "file_id")
@@ -127,4 +141,17 @@ fun CommandMeta.parseArgsSchema(): ArgsSchema? {
         )
     }.toMap()
     return ArgsSchema(parsed)
+}
+
+fun parseExportResponse(result: Any?, adapter: com.squareup.moshi.JsonAdapter<ExportResponse>): ExportResponse? {
+    if (result == null) {
+        return null
+    }
+    val payload = if (result is Map<*, *>) {
+        val nested = result["export"]
+        if (nested is Map<*, *>) nested else result
+    } else {
+        result
+    }
+    return runCatching { adapter.fromJsonValue(payload) }.getOrNull()
 }

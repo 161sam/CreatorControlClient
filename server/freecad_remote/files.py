@@ -1,6 +1,7 @@
 import os
 import uuid
 import hashlib
+from typing import Any
 from fastapi import UploadFile
 
 def _ensure_dir(path: str) -> None:
@@ -43,3 +44,26 @@ def create_export_path(export_dir: str, filename: str) -> str:
     _ensure_dir(export_dir)
     export_id = "exp_" + uuid.uuid4().hex[:16] + "_" + filename.replace("/", "_").replace("\\", "_")
     return os.path.join(export_dir, export_id)
+
+_EXPORTS: dict[str, dict[str, Any]] = {}
+
+def sanitize_filename(filename: str) -> str:
+    base = os.path.basename(filename)
+    cleaned = base.replace("/", "_").replace("\\", "_").strip()
+    return cleaned or "export.bin"
+
+def build_export_path(export_dir: str, export_id: str, filename: str) -> str:
+    _ensure_dir(export_dir)
+    safe_name = sanitize_filename(filename)
+    return os.path.join(export_dir, f"{export_id}_{safe_name}")
+
+def register_export(export_id: str, payload: dict[str, Any]) -> None:
+    _EXPORTS[export_id] = payload
+
+def get_export(export_id: str) -> dict[str, Any] | None:
+    return _EXPORTS.get(export_id)
+
+def is_path_within_dir(base_dir: str, path: str) -> bool:
+    base = os.path.realpath(base_dir)
+    target = os.path.realpath(path)
+    return target == base or target.startswith(base + os.sep)

@@ -1,4 +1,6 @@
 from datetime import datetime, timezone
+import os
+import re
 
 from fastapi import FastAPI, Depends, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
@@ -8,7 +10,7 @@ from .security import require_token
 from .settings import settings
 from .runner import FreeCADRunner
 from .commands import exec_command, list_commands, get_commands_metadata, get_command_metadata
-from .files import save_upload, get_file_path
+from .files import save_upload, get_export, get_file_path, is_path_within_dir
 from .version import get_version_payload
 
 app = FastAPI(title="ccc-freecad-remote", version="0.1.0")
@@ -22,6 +24,7 @@ CAPABILITY_LIMITS = {
     "max_export_mb": 200,
     "max_job_seconds": 300,
 }
+EXPORT_ID_PATTERN = re.compile(r"[a-f0-9]{32}")
 
 class CommandReq(BaseModel):
     command: str
@@ -119,11 +122,42 @@ def files_import(req: ImportReq):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"import failed: {e}")
 
+def _get_export_or_404(export_id: str) -> dict:
+    if not EXPORT_ID_PATTERN.fullmatch(export_id):
+        raise HTTPException(status_code=400, detail="invalid export id")
+    export = get_export(export_id)
+    if not export:
+        raise HTTPException(status_code=404, detail="export not found")
+    return export
+
+def _export_media_type(fmt: str | None) -> str:
+    return {
+        "stl": "model/stl",
+        "step": "application/step",
+    }.get(fmt or "", "application/octet-stream")
+
+def _build_export_response(export: dict) -> FileResponse:
+    path = export.get("path")
+    if not isinstance(path, str) or not path:
+        raise HTTPException(status_code=500, detail="export path missing")
+    if not is_path_within_dir(settings.export_dir, path):
+        raise HTTPException(status_code=400, detail="invalid export path")
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="export file missing")
+    filename = export.get("filename") or os.path.basename(path)
+    media_type = _export_media_type(export.get("format"))
+    return FileResponse(path, filename=filename, media_type=media_type)
+
+@app.get("/api/v1/exports/{export_id}", dependencies=[Depends(require_token)])
+def exports_metadata(export_id: str):
+    return _get_export_or_404(export_id)
+
+@app.get("/api/v1/exports/{export_id}/download", dependencies=[Depends(require_token)])
+def exports_download(export_id: str):
+    export = _get_export_or_404(export_id)
+    return _build_export_response(export)
+
 @app.get("/api/v1/files/download/{export_id}", dependencies=[Depends(require_token)])
 def files_download(export_id: str):
-    path = f"{settings.export_dir}/{export_id}"
-    if not path or not path.startswith(settings.export_dir):
-        raise HTTPException(status_code=400, detail="invalid export id")
-    if not __import__("os").path.isfile(path):
-        raise HTTPException(status_code=404, detail="export not found")
-    return FileResponse(path, filename=export_id)
+    export = _get_export_or_404(export_id)
+    return _build_export_response(export)

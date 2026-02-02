@@ -6,9 +6,12 @@ import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotNull
 import org.junit.Before
 import org.junit.Test
 
@@ -184,6 +187,28 @@ class ApiClientSmokeTest {
     }
 
     @Test
+    fun `download export adds authorization header when token set`() {
+        ApiClient.setToken("download-token")
+        server.enqueue(MockResponse().setResponseCode(200).setBody("payload"))
+
+        ApiClient.downloadExport("/api/v1/exports/exp123/download").close()
+
+        val request = server.takeRequest()
+        assertEquals("Bearer download-token", request.getHeader("Authorization"))
+    }
+
+    @Test
+    fun `download export omits authorization header when token blank`() {
+        ApiClient.setToken("")
+        server.enqueue(MockResponse().setResponseCode(200).setBody("payload"))
+
+        ApiClient.downloadExport("/api/v1/exports/exp123/download").close()
+
+        val request = server.takeRequest()
+        assertNull(request.getHeader("Authorization"))
+    }
+
+    @Test
     fun `commands and command detail parse metadata`() = runBlocking {
         server.enqueue(
             MockResponse()
@@ -225,6 +250,39 @@ class ApiClientSmokeTest {
         assertEquals("open_new_doc", detail.name)
         assertEquals("message", detail.returns)
         assertEquals("session", detail.tags?.firstOrNull())
+    }
+
+    @Test
+    fun `parses export response from exec result`() = runBlocking {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    "{" +
+                        "\"ok\":true," +
+                        "\"result\":{" +
+                        "\"ok\":true," +
+                        "\"export_id\":\"exp123\"," +
+                        "\"format\":\"stl\"," +
+                        "\"filename\":\"export_exp123.stl\"," +
+                        "\"path\":\"/tmp/export_exp123.stl\"," +
+                        "\"download_url\":\"/api/v1/exports/exp123/download\"," +
+                        "\"size\":321," +
+                        "\"created_utc\":\"2024-02-02T00:00:00Z\"" +
+                        "}" +
+                        "}"
+                )
+        )
+
+        val response = ApiClient.api.execCommand(ExecCommandRequest("export_current_doc", mapOf("format" to "stl")))
+        val adapter = Moshi.Builder().add(KotlinJsonAdapterFactory()).build().adapter(ExportResponse::class.java)
+        val export = parseExportResponse(response.result, adapter)
+
+        assertNotNull(export)
+        assertEquals("exp123", export?.exportId)
+        assertEquals("stl", export?.format)
+        assertEquals("/api/v1/exports/exp123/download", export?.downloadUrl)
+        assertEquals("2024-02-02T00:00:00Z", export?.createdUtc)
     }
 
     @Test
