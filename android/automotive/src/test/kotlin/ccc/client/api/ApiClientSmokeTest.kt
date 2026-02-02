@@ -1,6 +1,9 @@
 package ccc.client.api
 
 import kotlinx.coroutines.runBlocking
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
@@ -305,5 +308,64 @@ class ApiClientSmokeTest {
 
         assertEquals(true, response.ok)
         assertEquals("req-99", response.requestId)
+    }
+
+    @Test
+    fun `upload sends authorization header when token set`() = runBlocking {
+        ApiClient.setToken("upload-token")
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    "{" +
+                        "\"ok\":true," +
+                        "\"file_id\":\"file_123\"," +
+                        "\"path\":\"/tmp/file_123\"," +
+                        "\"filename\":\"model.stl\"," +
+                        "\"size\":123," +
+                        "\"mime\":\"application/sla\"" +
+                        "}"
+                )
+        )
+
+        val body = "solid".toRequestBody("application/sla".toMediaType())
+        val part = MultipartBody.Part.createFormData("file", "model.stl", body)
+        ApiClient.api.upload(part)
+
+        val request = server.takeRequest()
+        assertEquals("/api/v1/files/upload", request.path)
+        assertEquals("Bearer upload-token", request.getHeader("Authorization"))
+        val contentType = request.getHeader("Content-Type") ?: ""
+        assertEquals(true, contentType.contains("multipart/form-data"))
+    }
+
+    @Test
+    fun `parses upload response`() = runBlocking {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    "{" +
+                        "\"ok\":true," +
+                        "\"file_id\":\"file_abc\"," +
+                        "\"path\":\"/uploads/file_abc\"," +
+                        "\"filename\":\"model.step\"," +
+                        "\"size\":456," +
+                        "\"mime\":\"application/step\"," +
+                        "\"sha256\":\"deadbeef\"" +
+                        "}"
+                )
+        )
+
+        val body = "data".toRequestBody("application/step".toMediaType())
+        val part = MultipartBody.Part.createFormData("file", "model.step", body)
+        val response = ApiClient.api.upload(part)
+
+        assertEquals(true, response.ok)
+        assertEquals("file_abc", response.fileId)
+        assertEquals("/uploads/file_abc", response.path)
+        assertEquals("model.step", response.filename)
+        assertEquals(456L, response.size)
+        assertEquals("application/step", response.mime)
     }
 }

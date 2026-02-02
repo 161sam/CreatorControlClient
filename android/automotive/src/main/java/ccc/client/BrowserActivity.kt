@@ -2,8 +2,11 @@ package ccc.client
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -15,6 +18,8 @@ import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import ccc.client.api.ApiClient
@@ -24,6 +29,7 @@ import ccc.client.api.CommandMeta
 import ccc.client.api.CommandsResponse
 import ccc.client.api.ExecCommandRequest
 import ccc.client.api.ExecCommandResponse
+import ccc.client.api.UploadResponse
 import ccc.client.api.parseArgsSchema
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
@@ -34,15 +40,23 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.HttpException
 import okio.Buffer
+import okio.BufferedSink
+import okio.source
+import java.io.IOException
+import java.text.NumberFormat
 import java.time.ZonedDateTime
 
 class BrowserActivity : AppCompatActivity() {
     private var loadJob: Job? = null
     private var commandDetailJob: Job? = null
     private var execJob: Job? = null
+    private var uploadJob: Job? = null
+    private var importJob: Job? = null
+    private lateinit var pickFileLauncher: ActivityResultLauncher<Array<String>>
     private var currentSection: Section = Section.CAPABILITIES
     private var capabilities: CapabilitiesResponse? = null
     private var commands: CommandsResponse? = null
@@ -52,6 +66,14 @@ class BrowserActivity : AppCompatActivity() {
     private var lastExecRequestPayload: String? = null
     private var lastExecResponsePayload: String? = null
     private var lastExecHttpStatus: String? = null
+    private var selectedFile: SelectedFileInfo? = null
+    private var lastUploadRequestPayload: String? = null
+    private var lastUploadResponsePayload: String? = null
+    private var lastUploadHttpStatus: String? = null
+    private var lastUploadResponse: UploadResponse? = null
+    private var lastImportRequestPayload: String? = null
+    private var lastImportResponsePayload: String? = null
+    private var lastImportHttpStatus: String? = null
 
     private val moshi: Moshi by lazy {
         Moshi.Builder()
@@ -62,6 +84,7 @@ class BrowserActivity : AppCompatActivity() {
     private val commandsAdapter by lazy { moshi.adapter(CommandsResponse::class.java) }
     private val commandAdapter by lazy { moshi.adapter(CommandMeta::class.java) }
     private val execResponseAdapter by lazy { moshi.adapter(ExecCommandResponse::class.java) }
+    private val uploadResponseAdapter by lazy { moshi.adapter(UploadResponse::class.java) }
     private val mapAdapter by lazy {
         val type = Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java)
         moshi.adapter<Map<String, Any?>>(type)
@@ -104,6 +127,54 @@ class BrowserActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             addView(reloadButton)
             addView(copyButton)
+        }
+        val filesTitle = TextView(this).apply {
+            text = "Files"
+            textSize = 16f
+            setTextColor(Color.BLACK)
+            setPadding(0, 8, 0, 8)
+        }
+        val pickFileButton = Button(this).apply {
+            text = "Pick file"
+        }
+        val uploadButton = Button(this).apply {
+            text = "Upload"
+            isEnabled = false
+        }
+        val importButton = Button(this).apply {
+            text = "Import"
+            isEnabled = false
+        }
+        val fileStatusView = TextView(this).apply {
+            textSize = 14f
+            setTextColor(Color.DKGRAY)
+            setPadding(0, 0, 0, 8)
+            text = "No file selected."
+        }
+        val uploadStatusView = TextView(this).apply {
+            textSize = 14f
+            setTextColor(Color.BLACK)
+            setPadding(0, 0, 0, 8)
+        }
+        val importStatusView = TextView(this).apply {
+            textSize = 14f
+            setTextColor(Color.BLACK)
+            setPadding(0, 0, 0, 8)
+        }
+        val filesContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(filesTitle)
+            addView(pickFileButton)
+            addView(fileStatusView)
+            addView(uploadButton)
+            addView(uploadStatusView)
+            addView(importButton)
+            addView(importStatusView)
+        }
+        pickFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) {
+                handlePickedFile(uri, fileStatusView, uploadStatusView, importStatusView, uploadButton, importButton)
+            }
         }
         val capabilitiesButton = Button(this).apply {
             text = "Capabilities"
@@ -261,6 +332,7 @@ class BrowserActivity : AppCompatActivity() {
             addView(statusView)
             addView(detailsView)
             addView(messageView)
+            addView(filesContainer)
             addView(buttonRow)
             addView(sectionRow)
             addView(scrollView)
@@ -289,6 +361,15 @@ class BrowserActivity : AppCompatActivity() {
         }
         copyButton.setOnClickListener {
             copyDiagnostics(statusView, detailsView, messageView)
+        }
+        pickFileButton.setOnClickListener {
+            pickFileLauncher.launch(buildFileMimeTypes())
+        }
+        uploadButton.setOnClickListener {
+            uploadSelectedFile(fileStatusView, uploadStatusView, importStatusView, uploadButton, importButton)
+        }
+        importButton.setOnClickListener {
+            importUploadedFile(importStatusView, importButton)
         }
         capabilitiesButton.setOnClickListener {
             currentSection = Section.CAPABILITIES
@@ -440,6 +521,233 @@ class BrowserActivity : AppCompatActivity() {
         commandsContainer?.visibility = if (showCapabilities) View.GONE else View.VISIBLE
         val showDetail = !showCapabilities && !commandDetailView?.text.isNullOrBlank()
         commandDetailContainer?.visibility = if (showDetail) View.VISIBLE else View.GONE
+    }
+
+    private fun buildFileMimeTypes(): Array<String> {
+        return arrayOf(
+            "model/*",
+            "model/stl",
+            "model/step",
+            "application/sla",
+            "application/step",
+            "application/octet-stream",
+            "*/*"
+        )
+    }
+
+    private fun handlePickedFile(
+        uri: Uri,
+        fileStatusView: TextView,
+        uploadStatusView: TextView,
+        importStatusView: TextView,
+        uploadButton: Button,
+        importButton: Button
+    ) {
+        val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+        runCatching { contentResolver.takePersistableUriPermission(uri, flags) }
+        val meta = querySelectedFile(uri)
+        if (meta == null) {
+            Toast.makeText(this, "Unable to read file metadata.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        selectedFile = meta
+        fileStatusView.text = buildFileStatusText(meta)
+        uploadStatusView.text = "Ready to upload."
+        importStatusView.text = ""
+        uploadButton.isEnabled = true
+        importButton.isEnabled = false
+        lastUploadRequestPayload = null
+        lastUploadResponsePayload = null
+        lastUploadHttpStatus = null
+        lastUploadResponse = null
+        lastImportRequestPayload = null
+        lastImportResponsePayload = null
+        lastImportHttpStatus = null
+        uploadJob?.cancel()
+        importJob?.cancel()
+    }
+
+    private fun querySelectedFile(uri: Uri): SelectedFileInfo? {
+        var name: String? = null
+        var size: Long? = null
+        contentResolver.query(
+            uri,
+            arrayOf(android.provider.OpenableColumns.DISPLAY_NAME, android.provider.OpenableColumns.SIZE),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                if (nameIndex >= 0) {
+                    name = cursor.getString(nameIndex)
+                }
+                if (sizeIndex >= 0) {
+                    size = cursor.getLong(sizeIndex)
+                }
+            }
+        }
+        val mime = contentResolver.getType(uri)
+        if (name.isNullOrBlank()) {
+            return null
+        }
+        return SelectedFileInfo(uri, name!!, size, mime)
+    }
+
+    private fun uploadSelectedFile(
+        fileStatusView: TextView,
+        uploadStatusView: TextView,
+        importStatusView: TextView,
+        uploadButton: Button,
+        importButton: Button
+    ) {
+        if (uploadJob?.isActive == true) {
+            return
+        }
+        val file = selectedFile
+        if (file == null) {
+            Toast.makeText(this, "Pick a file first.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        fileStatusView.text = buildFileStatusText(file)
+        uploadStatusView.text = "Uploading…"
+        importStatusView.text = ""
+        uploadButton.isEnabled = false
+        importButton.isEnabled = false
+        lastUploadRequestPayload = buildUploadRequestSummary(file)
+        lastUploadResponsePayload = null
+        lastUploadHttpStatus = null
+        uploadJob = lifecycleScope.launch {
+            try {
+                val response = withContext(Dispatchers.IO) {
+                    val mime = (file.mime ?: "application/octet-stream").toMediaType()
+                    val body = ContentUriRequestBody(this@BrowserActivity, file.uri, mime, file.size)
+                    val part = MultipartBody.Part.createFormData("file", file.name, body)
+                    ApiClient.api.upload(part)
+                }
+                lastUploadHttpStatus = "HTTP 200"
+                lastUploadResponse = response
+                lastUploadResponsePayload = uploadResponseAdapter.toJson(response)
+                uploadStatusView.text = buildUploadResultText(response)
+                importButton.isEnabled = response.fileId != null || response.path != null
+            } catch (e: Exception) {
+                val httpException = e as? HttpException
+                val rawBody = httpException?.response()?.errorBody()?.string()
+                val errorMessage = if (httpException != null) {
+                    val bodyText = rawBody?.takeIf { it.isNotBlank() } ?: "<no body>"
+                    "HTTP ${httpException.code()}: ${truncate(bodyText, 200)}"
+                } else {
+                    val message = e.message ?: "unknown error"
+                    "${e.javaClass.simpleName}: $message"
+                }
+                lastUploadHttpStatus = if (httpException != null) "HTTP ${httpException.code()}" else "error"
+                lastUploadResponse = null
+                lastUploadResponsePayload = rawBody ?: errorMessage
+                uploadStatusView.text = "Upload failed: $errorMessage"
+                importButton.isEnabled = false
+            } finally {
+                uploadJob = null
+                uploadButton.isEnabled = true
+            }
+        }
+    }
+
+    private fun importUploadedFile(
+        importStatusView: TextView,
+        importButton: Button
+    ) {
+        if (importJob?.isActive == true) {
+            return
+        }
+        val file = selectedFile
+        val uploadResponse = lastUploadResponse
+        val fileId = uploadResponse?.fileId
+        val path = uploadResponse?.path
+        if (fileId.isNullOrBlank() && path.isNullOrBlank()) {
+            Toast.makeText(this, "Upload a file before importing.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val args = mutableMapOf<String, Any?>()
+        if (!fileId.isNullOrBlank()) {
+            args["file_id"] = fileId
+        } else if (!path.isNullOrBlank()) {
+            args["path"] = path
+        }
+        val format = inferFormat(file?.name ?: path.orEmpty())
+        if (!format.isNullOrBlank()) {
+            args["format"] = format
+        }
+        val requestPayload = mapOf("command" to "import_file", "args" to args)
+        lastImportRequestPayload = toPrettyJson(requestPayload)
+        lastImportResponsePayload = null
+        lastImportHttpStatus = null
+        importStatusView.text = "Importing…"
+        importButton.isEnabled = false
+        importJob = lifecycleScope.launch {
+            try {
+                val execResponse = withContext(Dispatchers.IO) {
+                    ApiClient.api.execCommand(ExecCommandRequest("import_file", args))
+                }
+                lastImportHttpStatus = "HTTP 200"
+                lastImportResponsePayload = execResponseAdapter.toJson(execResponse)
+                val statusText = when {
+                    execResponse.ok == true -> "success"
+                    !execResponse.status.isNullOrBlank() -> execResponse.status
+                    else -> "error"
+                }
+                importStatusView.text = buildImportResultText(statusText, execResponse)
+            } catch (e: Exception) {
+                val httpException = e as? HttpException
+                val rawBody = httpException?.response()?.errorBody()?.string()
+                val errorMessage = if (httpException != null) {
+                    val bodyText = rawBody?.takeIf { it.isNotBlank() } ?: "<no body>"
+                    "HTTP ${httpException.code()}: ${truncate(bodyText, 200)}"
+                } else {
+                    val message = e.message ?: "unknown error"
+                    "${e.javaClass.simpleName}: $message"
+                }
+                lastImportHttpStatus = if (httpException != null) "HTTP ${httpException.code()}" else "error"
+                lastImportResponsePayload = rawBody ?: errorMessage
+                importStatusView.text = "Import failed: $errorMessage"
+            } finally {
+                importJob = null
+                importButton.isEnabled = true
+            }
+        }
+    }
+
+    private fun buildFileStatusText(file: SelectedFileInfo): String {
+        val sizeText = file.size?.let { NumberFormat.getInstance().format(it) + " bytes" } ?: "unknown size"
+        val mimeText = file.mime ?: "unknown mime"
+        return "Selected: ${file.name} ($sizeText, $mimeText)"
+    }
+
+    private fun buildUploadRequestSummary(file: SelectedFileInfo): String {
+        val sizeText = file.size?.toString() ?: "<unknown>"
+        return "file=${file.name} size=${sizeText} mime=${file.mime ?: "unknown"}"
+    }
+
+    private fun buildUploadResultText(response: UploadResponse): String {
+        val okText = if (response.ok == true) "ok" else "error"
+        val idText = response.fileId ?: "<none>"
+        val pathText = response.path ?: "<none>"
+        val sizeText = response.size?.toString() ?: "<unknown>"
+        return "Upload $okText: id=$idText size=$sizeText path=$pathText"
+    }
+
+    private fun buildImportResultText(status: String, response: ExecCommandResponse): String {
+        val resultText = response.result?.let { truncateJson(toPrettyJson(it), 800) } ?: "<none>"
+        return "Import $status\n$resultText"
+    }
+
+    private fun inferFormat(name: String): String? {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        return when (ext) {
+            "stp" -> "step"
+            "step", "stl", "obj", "iges", "fcstd" -> ext
+            else -> null
+        }
     }
 
     private fun formatCapabilities(response: CapabilitiesResponse): String {
@@ -830,6 +1138,13 @@ class BrowserActivity : AppCompatActivity() {
         val execRequest = lastExecRequestPayload?.let { redactToken(it) } ?: "<none>"
         val execResponse = lastExecResponsePayload ?: "<none>"
         val execStatus = lastExecHttpStatus ?: "<none>"
+        val uploadRequest = lastUploadRequestPayload ?: "<none>"
+        val uploadResponse = lastUploadResponsePayload ?: "<none>"
+        val uploadStatus = lastUploadHttpStatus ?: "<none>"
+        val importRequest = lastImportRequestPayload?.let { redactToken(it) } ?: "<none>"
+        val importResponse = lastImportResponsePayload ?: "<none>"
+        val importStatus = lastImportHttpStatus ?: "<none>"
+        val fileSummary = selectedFile?.let { buildFileStatusText(it) } ?: "<none>"
         val messageText = messageView.text?.toString()?.trim().orEmpty()
         return buildString {
             appendLine("CCC browser diagnostics")
@@ -865,6 +1180,21 @@ class BrowserActivity : AppCompatActivity() {
             appendLine("  ${truncateJson(execRequest, 2000).replace("\n", "\n  ")}")
             appendLine("last_exec_response_payload:")
             appendLine("  ${truncateJson(execResponse, 2000).replace("\n", "\n  ")}")
+            appendLine()
+            appendLine("file_selection:")
+            appendLine("  ${fileSummary.replace("\n", "\n  ")}")
+            appendLine()
+            appendLine("upload_status: $uploadStatus")
+            appendLine("upload_request:")
+            appendLine("  ${truncateJson(uploadRequest, 2000).replace("\n", "\n  ")}")
+            appendLine("upload_response:")
+            appendLine("  ${truncateJson(uploadResponse, 2000).replace("\n", "\n  ")}")
+            appendLine()
+            appendLine("import_status: $importStatus")
+            appendLine("import_request:")
+            appendLine("  ${truncateJson(importRequest, 2000).replace("\n", "\n  ")}")
+            appendLine("import_response:")
+            appendLine("  ${truncateJson(importResponse, 2000).replace("\n", "\n  ")}")
         }
     }
 
@@ -894,6 +1224,33 @@ class BrowserActivity : AppCompatActivity() {
             return payload
         }
         return payload.replace(token, maskToken(token))
+    }
+
+    private data class SelectedFileInfo(
+        val uri: Uri,
+        val name: String,
+        val size: Long?,
+        val mime: String?
+    )
+
+    private class ContentUriRequestBody(
+        private val context: Context,
+        private val uri: Uri,
+        private val contentType: okhttp3.MediaType,
+        private val contentLength: Long?
+    ) : okhttp3.RequestBody() {
+        override fun contentType(): okhttp3.MediaType = contentType
+
+        override fun contentLength(): Long = contentLength ?: -1L
+
+        @Throws(IOException::class)
+        override fun writeTo(sink: BufferedSink) {
+            val inputStream = context.contentResolver.openInputStream(uri)
+                ?: throw IOException("Unable to open input stream for $uri")
+            inputStream.use { input ->
+                sink.writeAll(input.source())
+            }
+        }
     }
 
     private enum class Section {

@@ -84,6 +84,17 @@ data class ExecCommandResponse(
     val result: Any?
 )
 
+data class UploadResponse(
+    val ok: Boolean?,
+    @Json(name = "file_id")
+    val fileId: String?,
+    val path: String?,
+    val filename: String?,
+    val size: Long?,
+    val mime: String?,
+    val sha256: String?
+)
+
 data class ArgSpec(
     val type: String?,
     val required: Boolean,

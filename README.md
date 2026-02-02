@@ -40,9 +40,9 @@ without VNC, cloud lock-in or vendor dependencies.
 - ✅ Android app skeleton
 - ✅ Android ↔ Server connectivity (Retrofit + Moshi)
 - ✅ End-to-end health check from Android device
+- ✅ File upload and import pipeline
 
 ### In Progress
-- ⏳ File upload → FreeCAD import pipeline
 - ⏳ Command whitelist execution
 - ⏳ Basic Android UI for server state & actions
 
@@ -172,6 +172,7 @@ Quick verification (starts server + runs checks):
 server/scripts/smoke_healthz.sh
 server/scripts/smoke_info.sh
 server/scripts/smoke_capabilities.sh
+server/scripts/smoke_upload_import.sh
 ```
 
 ### Android (local build)
@@ -198,6 +199,29 @@ buildConfigField("String", "CCC_TOKEN", "\"\"")
 * `CCC_BASE_URL`: `http://127.0.0.1:4828/`
 * `CCC_MODE`: `usb`
 * `CCC_TOKEN`: (optional, required for current `/api/v1/healthz`)
+
+### Android Upload → Import flow
+
+1. Start the server with a token.
+2. Ensure `adb reverse tcp:4828 tcp:4828` is enabled (USB) or use LAN IP in `CCC_BASE_URL`.
+3. Open **Browser → Files → Pick file → Upload → Import**.
+
+Upload with curl:
+
+```bash
+curl -H "Authorization: Bearer ${CCC_TOKEN}" \
+  -F "file=@./model.step" \
+  http://127.0.0.1:4828/api/v1/files/upload
+```
+
+Import via command exec:
+
+```bash
+curl -H "Authorization: Bearer ${CCC_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"command":"import_file","args":{"file_id":"file_123"}}' \
+  http://127.0.0.1:4828/api/v1/commands/exec
+```
 
 **LAN mode (device → PC over WiFi):**
 
