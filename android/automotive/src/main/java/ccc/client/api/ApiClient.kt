@@ -4,6 +4,8 @@ import ccc.client.AppConfig
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
@@ -51,9 +53,26 @@ object ApiClient {
         tokenProvider.setToken(token)
     }
 
+    fun downloadExport(downloadUrl: String): Response {
+        val resolvedUrl = resolveUrl(downloadUrl)
+        val request = Request.Builder()
+            .url(resolvedUrl)
+            .get()
+            .build()
+        return okHttp.newCall(request).execute()
+    }
+
     internal fun setBaseUrlForTests(url: String) {
         baseUrl = url
         api = createRetrofit().create(CccApi::class.java)
+    }
+
+    private fun resolveUrl(path: String): String {
+        return if (path.startsWith("http://") || path.startsWith("https://")) {
+            path
+        } else {
+            baseUrl.trimEnd('/') + path
+        }
     }
 
     private fun logDebug(message: String) {

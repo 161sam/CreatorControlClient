@@ -173,6 +173,7 @@ server/scripts/smoke_healthz.sh
 server/scripts/smoke_info.sh
 server/scripts/smoke_capabilities.sh
 server/scripts/smoke_upload_import.sh
+server/scripts/smoke_export.sh
 ```
 
 ### Android (local build)
@@ -223,6 +224,23 @@ curl -H "Authorization: Bearer ${CCC_TOKEN}" \
   http://127.0.0.1:4828/api/v1/commands/exec
 ```
 
+Export current document via command exec:
+
+```bash
+curl -H "Authorization: Bearer ${CCC_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"command":"export_current_doc","args":{"format":"stl"}}' \
+  http://127.0.0.1:4828/api/v1/commands/exec
+```
+
+Download the export (use `download_url` from the response):
+
+```bash
+curl -H "Authorization: Bearer ${CCC_TOKEN}" \
+  -o export.stl \
+  http://127.0.0.1:4828/api/v1/exports/<export_id>/download
+```
+
 **LAN mode (device → PC over WiFi):**
 
 * `CCC_BASE_URL`: `http://<YOUR_PC_IP>:4828/`
@@ -245,6 +263,12 @@ metadata, with command detail fetched from `/api/v1/commands/{name}`, plus a
 "Copy browser diagnostics" button to share the current payloads. Command detail
 now supports **Run**, renders an arguments form from `args_schema`, and offers a
 Raw JSON mode for fallback payloads.
+
+### Android Export flow
+
+1. Start the server with a token.
+2. Ensure `adb reverse tcp:4828 tcp:4828` is enabled (USB) or use LAN IP in `CCC_BASE_URL`.
+3. Open **Browser → Exports → Export STL/STEP → Download**.
 
 Command exec example:
 
