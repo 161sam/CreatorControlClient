@@ -65,4 +65,55 @@ class ApiClientSmokeTest {
 
         assertEquals(true, response.ok)
     }
+
+    @Test
+    fun `version sends authorization header when token set`() = runBlocking {
+        ApiClient.setToken("abc123")
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody("{\"name\":\"CreatorControlServer\",\"version\":\"0.1.0-dev\",\"git_sha\":null}")
+        )
+
+        ApiClient.api.version()
+
+        val request = server.takeRequest()
+        assertEquals("Bearer abc123", request.getHeader("Authorization"))
+    }
+
+    @Test
+    fun `parses version and info responses`() = runBlocking {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody("{\"name\":\"CreatorControlServer\",\"version\":\"0.1.0-dev\",\"git_sha\":null}")
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    "{" +
+                        "\"service\":\"CreatorControlServer\"," +
+                        "\"api_version\":\"v1\"," +
+                        "\"auth\":{\"required\":true,\"scheme\":\"bearer\"}," +
+                        "\"time_utc\":\"2024-01-01T00:00:00Z\"," +
+                        "\"version\":{\"name\":\"CreatorControlServer\",\"version\":\"0.1.0-dev\",\"git_sha\":null}" +
+                        "}"
+                )
+        )
+
+        val version = ApiClient.api.version()
+        val info = ApiClient.api.info()
+
+        assertEquals("CreatorControlServer", version.name)
+        assertEquals("0.1.0-dev", version.version)
+        assertNull(version.gitSha)
+
+        assertEquals("CreatorControlServer", info.service)
+        assertEquals("v1", info.apiVersion)
+        assertEquals(true, info.auth?.required)
+        assertEquals("bearer", info.auth?.scheme)
+        assertEquals("2024-01-01T00:00:00Z", info.timeUtc)
+        assertEquals("CreatorControlServer", info.version?.name)
+    }
 }

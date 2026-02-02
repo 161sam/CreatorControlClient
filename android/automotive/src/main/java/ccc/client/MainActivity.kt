@@ -11,6 +11,8 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import ccc.client.api.ApiClient
+import ccc.client.api.InfoResponse
+import ccc.client.api.VersionResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -94,7 +96,11 @@ class MainActivity : AppCompatActivity() {
                 Log.i(tag, "healthz OK: $res")
                 statusView.text = "OK"
                 statusView.setTextColor(Color.rgb(46, 125, 50))
-                messageView.text = "Response: ok=${res.ok}"
+                val messages = mutableListOf<String>()
+                messages.add("healthz: ok=${res.ok}")
+                messages.add(fetchVersionLine())
+                messages.addAll(fetchInfoLines())
+                messageView.text = messages.joinToString("\n")
             } catch (e: Exception) {
                 Log.e(tag, "healthz failed", e)
                 statusView.text = "ERROR"
@@ -120,6 +126,40 @@ class MainActivity : AppCompatActivity() {
     private fun maskToken(token: String): String {
         val suffix = if (token.length <= 3) token else token.takeLast(3)
         return "****$suffix"
+    }
+
+    private suspend fun fetchVersionLine(): String {
+        return try {
+            val version = withContext(Dispatchers.IO) { ApiClient.api.version() }
+            formatVersionLine(version)
+        } catch (e: Exception) {
+            "version: ERROR ${formatErrorMessage(e)}"
+        }
+    }
+
+    private suspend fun fetchInfoLines(): List<String> {
+        return try {
+            val info = withContext(Dispatchers.IO) { ApiClient.api.info() }
+            formatInfoLines(info)
+        } catch (e: Exception) {
+            listOf("info: ERROR ${formatErrorMessage(e)}")
+        }
+    }
+
+    private fun formatVersionLine(version: VersionResponse): String {
+        val shaText = version.gitSha?.takeIf { it.isNotBlank() }?.let { " (sha=$it)" } ?: ""
+        return "version: ${version.name} ${version.version}$shaText"
+    }
+
+    private fun formatInfoLines(info: InfoResponse): List<String> {
+        val timeText = info.timeUtc ?: "<unknown>"
+        val auth = info.auth
+        val schemeText = auth?.scheme ?: "unknown"
+        val requiredText = auth?.required?.toString() ?: "unknown"
+        return listOf(
+            "time_utc: $timeText",
+            "auth: $schemeText required=$requiredText"
+        )
     }
 
     private fun formatErrorMessage(error: Exception): String {
