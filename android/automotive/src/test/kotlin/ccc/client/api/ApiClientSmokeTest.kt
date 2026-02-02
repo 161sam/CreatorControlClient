@@ -260,4 +260,50 @@ class ApiClientSmokeTest {
         assertEquals(2, response.capabilities?.commands?.size)
         assertEquals(true, response.capabilities?.features?.get("model_browser"))
     }
+
+    @Test
+    fun `exec sends authorization header when token set`() = runBlocking {
+        ApiClient.setToken("exec-token")
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody("{\"ok\":true,\"request_id\":\"req-1\",\"result\":{\"message\":\"ok\"}}")
+        )
+
+        ApiClient.api.execCommand(ExecCommandRequest("open_new_doc", mapOf("path" to "/tmp/doc.fcstd")))
+
+        val request = server.takeRequest()
+        assertEquals("/api/v1/commands/exec", request.path)
+        assertEquals("Bearer exec-token", request.getHeader("Authorization"))
+        assertEquals(true, request.body.readUtf8().contains("\"command\":\"open_new_doc\""))
+    }
+
+    @Test
+    fun `exec does not send authorization header when token blank`() = runBlocking {
+        ApiClient.setToken("")
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody("{\"ok\":true,\"request_id\":\"req-1\",\"result\":{\"message\":\"ok\"}}")
+        )
+
+        ApiClient.api.execCommand(ExecCommandRequest("recompute"))
+
+        val request = server.takeRequest()
+        assertNull(request.getHeader("Authorization"))
+    }
+
+    @Test
+    fun `parses exec response`() = runBlocking {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody("{\"ok\":true,\"request_id\":\"req-99\",\"result\":{\"message\":\"ok\"}}")
+        )
+
+        val response = ApiClient.api.execCommand(ExecCommandRequest("fit_all"))
+
+        assertEquals(true, response.ok)
+        assertEquals("req-99", response.requestId)
+    }
 }

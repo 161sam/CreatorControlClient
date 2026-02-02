@@ -66,3 +66,54 @@ data class CommandMeta(
 data class CommandsResponse(
     val commands: List<CommandMeta>?
 )
+
+data class ExecCommandRequest(
+    val command: String,
+    val args: Map<String, Any?> = emptyMap(),
+    @Json(name = "request_id")
+    val requestId: String? = null
+)
+
+data class ExecCommandResponse(
+    val ok: Boolean?,
+    @Json(name = "request_id")
+    val requestId: String?,
+    val status: String?,
+    val stdout: String?,
+    val stderr: String?,
+    val result: Any?
+)
+
+data class ArgSpec(
+    val type: String?,
+    val required: Boolean,
+    val defaultValue: Any?,
+    val title: String?,
+    val description: String?
+)
+
+data class ArgsSchema(
+    val properties: Map<String, ArgSpec>
+)
+
+fun CommandMeta.parseArgsSchema(): ArgsSchema? {
+    val schema = argsSchema ?: return null
+    val properties = schema["properties"] as? Map<*, *> ?: return null
+    val required = (schema["required"] as? List<*>)?.mapNotNull { it as? String }?.toSet() ?: emptySet()
+    val parsed = properties.mapNotNull { (key, value) ->
+        val name = key as? String ?: return@mapNotNull null
+        val spec = value as? Map<*, *> ?: return@mapNotNull null
+        val type = spec["type"] as? String
+        val defaultValue = spec["default"]
+        val title = spec["title"] as? String
+        val description = spec["description"] as? String
+        name to ArgSpec(
+            type = type,
+            required = required.contains(name),
+            defaultValue = defaultValue,
+            title = title,
+            description = description
+        )
+    }.toMap()
+    return ArgsSchema(parsed)
+}

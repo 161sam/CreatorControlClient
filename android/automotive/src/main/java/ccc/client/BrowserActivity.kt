@@ -3,39 +3,55 @@ package ccc.client
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.graphics.Color
+import android.graphics.Typeface
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import ccc.client.api.ApiClient
+import ccc.client.api.ArgSpec
 import ccc.client.api.CapabilitiesResponse
 import ccc.client.api.CommandMeta
 import ccc.client.api.CommandsResponse
+import ccc.client.api.ExecCommandRequest
+import ccc.client.api.ExecCommandResponse
+import ccc.client.api.parseArgsSchema
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
+import com.squareup.moshi.JsonWriter
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import retrofit2.HttpException
+import okio.Buffer
 import java.time.ZonedDateTime
 
 class BrowserActivity : AppCompatActivity() {
     private var loadJob: Job? = null
     private var commandDetailJob: Job? = null
+    private var execJob: Job? = null
     private var currentSection: Section = Section.CAPABILITIES
     private var capabilities: CapabilitiesResponse? = null
     private var commands: CommandsResponse? = null
     private var selectedCommand: CommandMeta? = null
     private var selectedCommandName: String? = null
+    private var argInputs: List<ArgInput> = emptyList()
+    private var lastExecRequestPayload: String? = null
+    private var lastExecResponsePayload: String? = null
+    private var lastExecHttpStatus: String? = null
 
     private val moshi: Moshi by lazy {
         Moshi.Builder()
@@ -45,10 +61,12 @@ class BrowserActivity : AppCompatActivity() {
     private val capabilitiesAdapter by lazy { moshi.adapter(CapabilitiesResponse::class.java) }
     private val commandsAdapter by lazy { moshi.adapter(CommandsResponse::class.java) }
     private val commandAdapter by lazy { moshi.adapter(CommandMeta::class.java) }
+    private val execResponseAdapter by lazy { moshi.adapter(ExecCommandResponse::class.java) }
     private val mapAdapter by lazy {
         val type = Types.newParameterizedType(Map::class.java, String::class.java, Any::class.java)
         moshi.adapter<Map<String, Any?>>(type)
     }
+    private val anyAdapter by lazy { moshi.adapter(Any::class.java) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -120,11 +138,107 @@ class BrowserActivity : AppCompatActivity() {
             textSize = 14f
             setTextColor(Color.BLACK)
         }
+        val argsTitle = TextView(this).apply {
+            text = "Arguments"
+            textSize = 16f
+            setTextColor(Color.BLACK)
+            setPadding(0, 16, 0, 8)
+        }
+        val argsHintView = TextView(this).apply {
+            textSize = 14f
+            setTextColor(Color.DKGRAY)
+            setPadding(0, 0, 0, 8)
+        }
+        val argsContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+        val rawJsonToggle = Switch(this).apply {
+            text = "Raw JSON"
+            setPadding(0, 8, 0, 8)
+        }
+        val rawJsonInput = EditText(this).apply {
+            hint = "{ \"command\": \"open_new_doc\", \"args\": { } }"
+            setTextColor(Color.BLACK)
+            setHintTextColor(Color.GRAY)
+            setPadding(12, 12, 12, 12)
+            minLines = 4
+            isSingleLine = false
+            visibility = View.GONE
+        }
+        val runButton = Button(this).apply {
+            text = "Run"
+        }
+        val resultTitle = TextView(this).apply {
+            text = "Result"
+            textSize = 16f
+            setTextColor(Color.BLACK)
+            setPadding(0, 16, 0, 8)
+        }
+        val resultStatus = TextView(this).apply {
+            textSize = 14f
+            setTextColor(Color.BLACK)
+            setPadding(0, 0, 0, 8)
+        }
+        val stdoutLabel = TextView(this).apply {
+            text = "stdout"
+            textSize = 14f
+            setTextColor(Color.DKGRAY)
+        }
+        val stdoutView = TextView(this).apply {
+            textSize = 13f
+            setTextColor(Color.BLACK)
+            typeface = Typeface.MONOSPACE
+            setPadding(0, 0, 0, 8)
+        }
+        val stderrLabel = TextView(this).apply {
+            text = "stderr"
+            textSize = 14f
+            setTextColor(Color.DKGRAY)
+        }
+        val stderrView = TextView(this).apply {
+            textSize = 13f
+            setTextColor(Color.BLACK)
+            typeface = Typeface.MONOSPACE
+            setPadding(0, 0, 0, 8)
+        }
+        val resultLabel = TextView(this).apply {
+            text = "result"
+            textSize = 14f
+            setTextColor(Color.DKGRAY)
+        }
+        val resultView = TextView(this).apply {
+            textSize = 13f
+            setTextColor(Color.BLACK)
+            typeface = Typeface.MONOSPACE
+            setPadding(0, 0, 0, 8)
+        }
+        val copyResultButton = Button(this).apply {
+            text = "Copy result"
+        }
+        val commandDetailContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(commandDetailTitle)
+            addView(commandDetailView)
+            addView(argsTitle)
+            addView(argsHintView)
+            addView(argsContainer)
+            addView(rawJsonToggle)
+            addView(rawJsonInput)
+            addView(runButton)
+            addView(resultTitle)
+            addView(resultStatus)
+            addView(stdoutLabel)
+            addView(stdoutView)
+            addView(stderrLabel)
+            addView(stderrView)
+            addView(resultLabel)
+            addView(resultView)
+            addView(copyResultButton)
+        }
 
         contentLayout.addView(capabilitiesView)
         contentLayout.addView(commandsContainer)
-        contentLayout.addView(commandDetailTitle)
-        contentLayout.addView(commandDetailView)
+        contentLayout.addView(commandDetailContainer)
 
         val scrollView = ScrollView(this).apply {
             addView(
@@ -153,23 +267,50 @@ class BrowserActivity : AppCompatActivity() {
         }
         setContentView(layout)
 
+        val commandDetailViews = CommandDetailViews(
+            container = commandDetailContainer,
+            detailView = commandDetailView,
+            argsTitle = argsTitle,
+            argsHint = argsHintView,
+            argsContainer = argsContainer,
+            rawJsonToggle = rawJsonToggle,
+            rawJsonInput = rawJsonInput,
+            runButton = runButton,
+            resultTitle = resultTitle,
+            resultStatus = resultStatus,
+            stdoutView = stdoutView,
+            stderrView = stderrView,
+            resultView = resultView,
+            copyResultButton = copyResultButton
+        )
+
         reloadButton.setOnClickListener {
-            loadData(statusView, messageView, capabilitiesView, commandsContainer, commandDetailTitle, commandDetailView)
+            loadData(statusView, messageView, capabilitiesView, commandsContainer, commandDetailViews)
         }
         copyButton.setOnClickListener {
             copyDiagnostics(statusView, detailsView, messageView)
         }
         capabilitiesButton.setOnClickListener {
             currentSection = Section.CAPABILITIES
-            updateSectionVisibility(capabilitiesView, commandsContainer, commandDetailTitle, commandDetailView)
+            updateSectionVisibility(capabilitiesView, commandsContainer, commandDetailContainer, commandDetailView)
         }
         commandsButton.setOnClickListener {
             currentSection = Section.COMMANDS
-            updateSectionVisibility(capabilitiesView, commandsContainer, commandDetailTitle, commandDetailView)
+            updateSectionVisibility(capabilitiesView, commandsContainer, commandDetailContainer, commandDetailView)
+        }
+        rawJsonToggle.setOnCheckedChangeListener { _, isChecked ->
+            rawJsonInput.visibility = if (isChecked) View.VISIBLE else View.GONE
+            setArgsInputsEnabled(argsContainer, !isChecked)
+        }
+        runButton.setOnClickListener {
+            runCommand(commandDetailViews)
+        }
+        copyResultButton.setOnClickListener {
+            copyExecDiagnostics()
         }
 
-        updateSectionVisibility(capabilitiesView, commandsContainer, commandDetailTitle, commandDetailView)
-        loadData(statusView, messageView, capabilitiesView, commandsContainer, commandDetailTitle, commandDetailView)
+        updateSectionVisibility(capabilitiesView, commandsContainer, commandDetailContainer, commandDetailView)
+        loadData(statusView, messageView, capabilitiesView, commandsContainer, commandDetailViews)
     }
 
     private fun loadData(
@@ -177,8 +318,7 @@ class BrowserActivity : AppCompatActivity() {
         messageView: TextView,
         capabilitiesView: TextView,
         commandsContainer: LinearLayout,
-        commandDetailTitle: TextView,
-        commandDetailView: TextView
+        commandDetailViews: CommandDetailViews
     ) {
         if (loadJob?.isActive == true) {
             return
@@ -190,8 +330,9 @@ class BrowserActivity : AppCompatActivity() {
         commandsContainer.removeAllViews()
         selectedCommand = null
         selectedCommandName = null
-        commandDetailView.text = ""
-        updateSectionVisibility(capabilitiesView, commandsContainer, commandDetailTitle, commandDetailView)
+        commandDetailViews.detailView.text = ""
+        resetExecViews(commandDetailViews)
+        updateSectionVisibility(capabilitiesView, commandsContainer, commandDetailViews.container, commandDetailViews.detailView)
 
         loadJob = lifecycleScope.launch {
             try {
@@ -202,7 +343,7 @@ class BrowserActivity : AppCompatActivity() {
                 statusView.text = "OK"
                 statusView.setTextColor(Color.rgb(46, 125, 50))
                 capabilitiesView.text = formatCapabilities(capabilitiesResult)
-                renderCommands(commandsResult, commandsContainer, commandDetailTitle, commandDetailView)
+                renderCommands(commandsResult, commandsContainer, commandDetailViews)
             } catch (e: Exception) {
                 statusView.text = "ERROR"
                 statusView.setTextColor(Color.rgb(198, 40, 40))
@@ -214,7 +355,7 @@ class BrowserActivity : AppCompatActivity() {
                 })
             } finally {
                 loadJob = null
-                updateSectionVisibility(capabilitiesView, commandsContainer, commandDetailTitle, commandDetailView)
+                updateSectionVisibility(capabilitiesView, commandsContainer, commandDetailViews.container, commandDetailViews.detailView)
             }
         }
     }
@@ -222,8 +363,7 @@ class BrowserActivity : AppCompatActivity() {
     private fun renderCommands(
         commandsResult: CommandsResponse,
         container: LinearLayout,
-        commandDetailTitle: TextView,
-        commandDetailView: TextView
+        commandDetailViews: CommandDetailViews
     ) {
         container.removeAllViews()
         val list = commandsResult.commands
@@ -249,10 +389,11 @@ class BrowserActivity : AppCompatActivity() {
                     if (name.isNullOrBlank()) {
                         selectedCommand = command
                         selectedCommandName = null
-                        commandDetailView.text = formatCommandDetail(command)
-                        updateSectionVisibility(null, null, commandDetailTitle, commandDetailView)
+                        commandDetailViews.detailView.text = formatCommandDetail(command)
+                        renderArgsSchema(commandDetailViews, command)
+                        updateSectionVisibility(null, null, commandDetailViews.container, commandDetailViews.detailView)
                     } else {
-                        loadCommandDetail(name, commandDetailTitle, commandDetailView)
+                        loadCommandDetail(name, commandDetailViews)
                     }
                 }
             }
@@ -262,26 +403,28 @@ class BrowserActivity : AppCompatActivity() {
 
     private fun loadCommandDetail(
         name: String,
-        commandDetailTitle: TextView,
-        commandDetailView: TextView
+        commandDetailViews: CommandDetailViews
     ) {
         if (commandDetailJob?.isActive == true) {
             return
         }
         selectedCommandName = name
-        commandDetailView.text = "Loading command detail…"
-        updateSectionVisibility(null, null, commandDetailTitle, commandDetailView)
+        commandDetailViews.detailView.text = "Loading command detail…"
+        resetExecViews(commandDetailViews)
+        updateSectionVisibility(null, null, commandDetailViews.container, commandDetailViews.detailView)
         commandDetailJob = lifecycleScope.launch {
             try {
                 val detail = withContext(Dispatchers.IO) { ApiClient.api.command(name) }
                 selectedCommand = detail
-                commandDetailView.text = formatCommandDetail(detail)
+                commandDetailViews.detailView.text = formatCommandDetail(detail)
+                renderArgsSchema(commandDetailViews, detail)
             } catch (e: Exception) {
                 selectedCommand = null
-                commandDetailView.text = "ERROR: ${formatErrorMessage(e)}"
+                commandDetailViews.detailView.text = "ERROR: ${formatErrorMessage(e)}"
+                renderArgsSchema(commandDetailViews, null)
             } finally {
                 commandDetailJob = null
-                updateSectionVisibility(null, null, commandDetailTitle, commandDetailView)
+                updateSectionVisibility(null, null, commandDetailViews.container, commandDetailViews.detailView)
             }
         }
     }
@@ -289,15 +432,14 @@ class BrowserActivity : AppCompatActivity() {
     private fun updateSectionVisibility(
         capabilitiesView: TextView?,
         commandsContainer: LinearLayout?,
-        commandDetailTitle: TextView?,
+        commandDetailContainer: LinearLayout?,
         commandDetailView: TextView?
     ) {
         val showCapabilities = currentSection == Section.CAPABILITIES
         capabilitiesView?.visibility = if (showCapabilities) View.VISIBLE else View.GONE
         commandsContainer?.visibility = if (showCapabilities) View.GONE else View.VISIBLE
         val showDetail = !showCapabilities && !commandDetailView?.text.isNullOrBlank()
-        commandDetailTitle?.visibility = if (showDetail) View.VISIBLE else View.GONE
-        commandDetailView?.visibility = if (showDetail) View.VISIBLE else View.GONE
+        commandDetailContainer?.visibility = if (showDetail) View.VISIBLE else View.GONE
     }
 
     private fun formatCapabilities(response: CapabilitiesResponse): String {
@@ -355,6 +497,254 @@ class BrowserActivity : AppCompatActivity() {
         }
     }
 
+    private fun renderArgsSchema(views: CommandDetailViews, command: CommandMeta?) {
+        views.argsContainer.removeAllViews()
+        argInputs = emptyList()
+        views.argsHint.text = ""
+        views.rawJsonToggle.isChecked = false
+        views.rawJsonInput.visibility = View.GONE
+        setArgsInputsEnabled(views.argsContainer, true)
+        val commandName = command?.name ?: selectedCommandName ?: "open_new_doc"
+        views.rawJsonInput.hint = "{ \"command\": \"$commandName\", \"args\": { } }"
+
+        if (command == null) {
+            views.argsHint.text = "No command selected."
+            return
+        }
+
+        val schema = command.parseArgsSchema()
+        if (schema == null || schema.properties.isEmpty()) {
+            views.argsHint.text = "No args schema; use Raw JSON."
+            return
+        }
+
+        val inputs = mutableListOf<ArgInput>()
+        schema.properties.forEach { (name, spec) ->
+            val label = TextView(this).apply {
+                text = buildArgLabel(name, spec)
+                textSize = 14f
+                setTextColor(Color.BLACK)
+                setPadding(0, 8, 0, 4)
+            }
+            val inputView: View = when (spec.type) {
+                "boolean" -> Switch(this).apply {
+                    isChecked = (spec.defaultValue as? Boolean) ?: false
+                    text = spec.description ?: ""
+                }
+                "integer" -> EditText(this).apply {
+                    inputType = android.text.InputType.TYPE_CLASS_NUMBER or
+                        android.text.InputType.TYPE_NUMBER_FLAG_SIGNED
+                    setTextColor(Color.BLACK)
+                    setHintTextColor(Color.GRAY)
+                    spec.description?.let { hint = it }
+                    (spec.defaultValue as? Number)?.let { setText(it.toLong().toString()) }
+                }
+                "number" -> EditText(this).apply {
+                    inputType = android.text.InputType.TYPE_CLASS_NUMBER or
+                        android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL or
+                        android.text.InputType.TYPE_NUMBER_FLAG_SIGNED
+                    setTextColor(Color.BLACK)
+                    setHintTextColor(Color.GRAY)
+                    spec.description?.let { hint = it }
+                    (spec.defaultValue as? Number)?.let { setText(it.toDouble().toString()) }
+                }
+                else -> EditText(this).apply {
+                    inputType = android.text.InputType.TYPE_CLASS_TEXT
+                    setTextColor(Color.BLACK)
+                    setHintTextColor(Color.GRAY)
+                    spec.description?.let { hint = it }
+                    (spec.defaultValue as? String)?.let { setText(it) }
+                }
+            }
+            views.argsContainer.addView(label)
+            views.argsContainer.addView(inputView)
+            inputs.add(ArgInput(name, spec, inputView))
+        }
+        argInputs = inputs
+    }
+
+    private fun runCommand(views: CommandDetailViews) {
+        if (execJob?.isActive == true) {
+            return
+        }
+        val commandName = selectedCommand?.name ?: selectedCommandName
+        if (commandName.isNullOrBlank()) {
+            Toast.makeText(this, "Select a command first.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val rawJsonMode = views.rawJsonToggle.isChecked
+        val rawJson = views.rawJsonInput.text?.toString()?.trim().orEmpty()
+        if (rawJsonMode) {
+            val parsed = runCatching { anyAdapter.fromJson(rawJson) }.getOrNull()
+            if (rawJson.isBlank() || parsed == null) {
+                Toast.makeText(this, "Raw JSON is invalid.", Toast.LENGTH_SHORT).show()
+                return
+            }
+        }
+
+        val argsMap = if (rawJsonMode) {
+            null
+        } else {
+            buildArgsMapOrNull() ?: return
+        }
+        val requestPayload = if (rawJsonMode) {
+            rawJson
+        } else {
+            val payload = mapOf("command" to commandName, "args" to argsMap)
+            toPrettyJson(payload)
+        }
+        lastExecRequestPayload = requestPayload
+        lastExecResponsePayload = null
+        lastExecHttpStatus = null
+        updateExecResultViews(views, null, null, null, "Running…")
+        execJob = lifecycleScope.launch {
+            setExecInProgress(views, true)
+            try {
+                val response = withContext(Dispatchers.IO) {
+                    if (rawJsonMode) {
+                        val body = requestPayload.toRequestBody("application/json".toMediaType())
+                        ApiClient.api.execCommandRaw(body)
+                    } else {
+                        ApiClient.api.execCommand(ExecCommandRequest(commandName, argsMap ?: emptyMap()))
+                    }
+                } ?: return@launch
+                lastExecHttpStatus = "HTTP 200"
+                lastExecResponsePayload = truncateJson(execResponseAdapter.toJson(response), 2000)
+                val statusText = when {
+                    response.ok == true -> "success"
+                    !response.status.isNullOrBlank() -> response.status
+                    else -> "error"
+                }
+                updateExecResultViews(
+                    views,
+                    response.stdout,
+                    response.stderr,
+                    response.result,
+                    "Status: $statusText ($lastExecHttpStatus)"
+                )
+            } catch (e: Exception) {
+                val httpException = e as? HttpException
+                val rawBody = httpException?.response()?.errorBody()?.string()
+                val errorMessage = if (httpException != null) {
+                    val bodyText = rawBody?.takeIf { it.isNotBlank() } ?: "<no body>"
+                    "HTTP ${httpException.code()}: ${truncate(bodyText, 200)}"
+                } else {
+                    val message = e.message ?: "unknown error"
+                    "${e.javaClass.simpleName}: $message"
+                }
+                val httpStatus = if (httpException != null) "HTTP ${httpException.code()}" else "error"
+                lastExecHttpStatus = httpStatus
+                lastExecResponsePayload = rawBody?.let { truncateJson(it, 2000) } ?: errorMessage
+                updateExecResultViews(
+                    views,
+                    stdout = null,
+                    stderr = errorMessage,
+                    result = lastExecResponsePayload,
+                    statusLine = "Status: error ($httpStatus)"
+                )
+            } finally {
+                setExecInProgress(views, false)
+            }
+        }
+    }
+
+    private fun buildArgsMapOrNull(): Map<String, Any?>? {
+        val args = mutableMapOf<String, Any?>()
+        for (input in argInputs) {
+            val value = parseArgValue(input) ?: return null
+            if (value.shouldInclude) {
+                args[input.name] = value.value
+            }
+        }
+        return args
+    }
+
+    private fun parseArgValue(input: ArgInput): ParsedArg? {
+        val spec = input.spec
+        return when (val view = input.view) {
+            is Switch -> {
+                ParsedArg(shouldInclude = true, value = view.isChecked)
+            }
+            is EditText -> {
+                val text = view.text?.toString()?.trim().orEmpty()
+                if (text.isBlank()) {
+                    if (spec.required) {
+                        Toast.makeText(this, "Required field: ${input.name}", Toast.LENGTH_SHORT).show()
+                        return null
+                    }
+                    return ParsedArg(shouldInclude = false, value = null)
+                }
+                when (spec.type) {
+                    "integer" -> {
+                        val parsed = text.toLongOrNull()
+                        if (parsed == null) {
+                            Toast.makeText(this, "Invalid integer for ${input.name}", Toast.LENGTH_SHORT).show()
+                            return null
+                        }
+                        ParsedArg(true, parsed)
+                    }
+                    "number" -> {
+                        val parsed = text.toDoubleOrNull()
+                        if (parsed == null) {
+                            Toast.makeText(this, "Invalid number for ${input.name}", Toast.LENGTH_SHORT).show()
+                            return null
+                        }
+                        ParsedArg(true, parsed)
+                    }
+                    else -> ParsedArg(true, text)
+                }
+            }
+            else -> ParsedArg(false, null)
+        }
+    }
+
+    private fun updateExecResultViews(
+        views: CommandDetailViews,
+        stdout: String?,
+        stderr: String?,
+        result: Any?,
+        statusLine: String
+    ) {
+        views.resultStatus.text = statusLine
+        views.stdoutView.text = stdout?.takeIf { it.isNotBlank() } ?: "<none>"
+        views.stderrView.text = stderr?.takeIf { it.isNotBlank() } ?: "<none>"
+        views.resultView.text = truncateJson(result?.let { toPrettyJson(it) } ?: "<none>", 2000)
+    }
+
+    private fun setExecInProgress(views: CommandDetailViews, inProgress: Boolean) {
+        views.runButton.isEnabled = !inProgress
+        views.rawJsonToggle.isEnabled = !inProgress
+        views.rawJsonInput.isEnabled = !inProgress
+        setArgsInputsEnabled(views.argsContainer, !inProgress && !views.rawJsonToggle.isChecked)
+    }
+
+    private fun resetExecViews(views: CommandDetailViews) {
+        views.resultStatus.text = ""
+        views.stdoutView.text = ""
+        views.stderrView.text = ""
+        views.resultView.text = ""
+        lastExecRequestPayload = null
+        lastExecResponsePayload = null
+        lastExecHttpStatus = null
+    }
+
+    private fun setArgsInputsEnabled(container: LinearLayout, enabled: Boolean) {
+        for (i in 0 until container.childCount) {
+            val child = container.getChildAt(i)
+            child.isEnabled = enabled
+            if (child is LinearLayout) {
+                setArgsInputsEnabled(child, enabled)
+            }
+        }
+        container.alpha = if (enabled) 1f else 0.5f
+    }
+
+    private fun buildArgLabel(name: String, spec: ArgSpec): String {
+        val typeLabel = spec.type ?: "unknown"
+        val requiredLabel = if (spec.required) " *" else ""
+        return "$name ($typeLabel)$requiredLabel"
+    }
+
     private fun formatMap(prefix: String, map: Map<String, Any?>?): String {
         if (map.isNullOrEmpty()) {
             return "${prefix}<none>"
@@ -384,6 +774,16 @@ class BrowserActivity : AppCompatActivity() {
         return truncate(input, maxLength)
     }
 
+    private fun toPrettyJson(value: Any?): String {
+        if (value == null) {
+            return "<none>"
+        }
+        val buffer = Buffer()
+        val writer = JsonWriter.of(buffer).apply { setIndent("  ") }
+        anyAdapter.toJson(writer, value)
+        return buffer.readUtf8()
+    }
+
     private fun buildConnectionDetails(): String {
         val token = AppConfig.token
         val authText = if (token.isNotBlank()) {
@@ -410,6 +810,13 @@ class BrowserActivity : AppCompatActivity() {
         Toast.makeText(this, "Browser diagnostics copied to clipboard", Toast.LENGTH_SHORT).show()
     }
 
+    private fun copyExecDiagnostics() {
+        val diagnosticsText = buildExecDiagnosticsText()
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        clipboard.setPrimaryClip(ClipData.newPlainText("CCC Exec Diagnostics", diagnosticsText))
+        Toast.makeText(this, "Command exec diagnostics copied to clipboard", Toast.LENGTH_SHORT).show()
+    }
+
     private fun buildDiagnosticsText(
         statusView: TextView,
         detailsView: TextView,
@@ -420,6 +827,9 @@ class BrowserActivity : AppCompatActivity() {
         val commandsJson = commands?.let { truncateJson(commandsAdapter.toJson(it), 1000) } ?: "<none>"
         val commandJson = selectedCommand?.let { truncateJson(commandAdapter.toJson(it), 1000) } ?: "<none>"
         val selectedName = selectedCommandName ?: selectedCommand?.name ?: "<none>"
+        val execRequest = lastExecRequestPayload?.let { redactToken(it) } ?: "<none>"
+        val execResponse = lastExecResponsePayload ?: "<none>"
+        val execStatus = lastExecHttpStatus ?: "<none>"
         val messageText = messageView.text?.toString()?.trim().orEmpty()
         return buildString {
             appendLine("CCC browser diagnostics")
@@ -449,11 +859,73 @@ class BrowserActivity : AppCompatActivity() {
             appendLine("selected_command: $selectedName")
             appendLine("command_detail_json:")
             appendLine("  ${commandJson.replace("\n", "\n  ")}")
+            appendLine()
+            appendLine("last_exec_status: $execStatus")
+            appendLine("last_exec_request_payload:")
+            appendLine("  ${truncateJson(execRequest, 2000).replace("\n", "\n  ")}")
+            appendLine("last_exec_response_payload:")
+            appendLine("  ${truncateJson(execResponse, 2000).replace("\n", "\n  ")}")
         }
+    }
+
+    private fun buildExecDiagnosticsText(): String {
+        val timestamp = ZonedDateTime.now().toString()
+        val commandName = selectedCommand?.name ?: selectedCommandName ?: "<none>"
+        val request = lastExecRequestPayload?.let { redactToken(it) } ?: "<none>"
+        val response = lastExecResponsePayload ?: "<none>"
+        val status = lastExecHttpStatus ?: "<none>"
+        return buildString {
+            appendLine("CCC command exec diagnostics")
+            appendLine("timestamp: $timestamp")
+            appendLine("command: $commandName")
+            appendLine("status: $status")
+            appendLine()
+            appendLine("request_payload:")
+            appendLine("  ${truncateJson(request, 2000).replace("\n", "\n  ")}")
+            appendLine()
+            appendLine("response_payload:")
+            appendLine("  ${truncateJson(response, 2000).replace("\n", "\n  ")}")
+        }
+    }
+
+    private fun redactToken(payload: String): String {
+        val token = AppConfig.token
+        if (token.isBlank()) {
+            return payload
+        }
+        return payload.replace(token, maskToken(token))
     }
 
     private enum class Section {
         CAPABILITIES,
         COMMANDS
     }
+
+    private data class CommandDetailViews(
+        val container: LinearLayout,
+        val detailView: TextView,
+        val argsTitle: TextView,
+        val argsHint: TextView,
+        val argsContainer: LinearLayout,
+        val rawJsonToggle: Switch,
+        val rawJsonInput: EditText,
+        val runButton: Button,
+        val resultTitle: TextView,
+        val resultStatus: TextView,
+        val stdoutView: TextView,
+        val stderrView: TextView,
+        val resultView: TextView,
+        val copyResultButton: Button
+    )
+
+    private data class ArgInput(
+        val name: String,
+        val spec: ArgSpec,
+        val view: View
+    )
+
+    private data class ParsedArg(
+        val shouldInclude: Boolean,
+        val value: Any?
+    )
 }
