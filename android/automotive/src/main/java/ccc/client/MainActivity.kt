@@ -3,6 +3,7 @@ package ccc.client
 import android.graphics.Color
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
@@ -54,10 +55,15 @@ class MainActivity : AppCompatActivity() {
             text = "Copy diagnostics"
             isEnabled = false
         }
+        val openBrowserButton = Button(this).apply {
+            text = "Open Browser"
+            isEnabled = true
+        }
         val buttonRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             addView(retryButton)
             addView(copyButton)
+            addView(openBrowserButton)
         }
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -89,6 +95,9 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
             copyDiagnostics(statusView, detailsView, messageView)
+        }
+        openBrowserButton.setOnClickListener {
+            startActivity(Intent(this, BrowserActivity::class.java))
         }
         runHealthCheck(statusView, messageView, retryButton, copyButton)
     }

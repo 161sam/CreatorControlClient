@@ -147,4 +147,117 @@ class ApiClientSmokeTest {
         assertEquals("2024-01-01T00:00:00Z", info.timeUtc)
         assertEquals("CreatorControlServer", info.version?.name)
     }
+
+    @Test
+    fun `capabilities sends authorization header when token set`() = runBlocking {
+        ApiClient.setToken("caps-token")
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    "{" +
+                        "\"service\":\"ccc-freecad-remote\"," +
+                        "\"api_version\":\"v1\"," +
+                        "\"time_utc\":\"2024-01-01T00:00:00Z\"," +
+                        "\"auth\":{\"required\":true,\"scheme\":\"bearer\"}," +
+                        "\"version\":{\"name\":\"ccc\",\"version\":\"0.1.0\",\"git_sha\":null}," +
+                        "\"freecad\":{\"version\":\"1.0\"}," +
+                        "\"session\":{\"pid\":1234}," +
+                        "\"capabilities\":{" +
+                        "\"import_formats\":[\"fcstd\"]," +
+                        "\"export_formats\":[\"fcstd\",\"stl\"]," +
+                        "\"commands\":[\"open_new_doc\"]," +
+                        "\"limits\":{\"max_upload_mb\":200}," +
+                        "\"features\":{\"model_browser\":true}" +
+                        "}" +
+                        "}"
+                )
+        )
+
+        ApiClient.api.capabilities()
+
+        val request = server.takeRequest()
+        assertEquals("Bearer caps-token", request.getHeader("Authorization"))
+    }
+
+    @Test
+    fun `commands and command detail parse metadata`() = runBlocking {
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    "{" +
+                        "\"commands\":[" +
+                        "{" +
+                        "\"name\":\"open_new_doc\"," +
+                        "\"description\":\"Create a new document.\"," +
+                        "\"args_schema\":{\"type\":\"object\",\"properties\":{}}," +
+                        "\"returns\":\"message\"," +
+                        "\"tags\":[\"session\"]" +
+                        "}" +
+                        "]" +
+                        "}"
+                )
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    "{" +
+                        "\"name\":\"open_new_doc\"," +
+                        "\"description\":\"Create a new document.\"," +
+                        "\"args_schema\":{\"type\":\"object\",\"properties\":{}}," +
+                        "\"returns\":\"message\"," +
+                        "\"tags\":[\"session\"]" +
+                        "}"
+                )
+        )
+
+        val commands = ApiClient.api.commands()
+        val detail = ApiClient.api.command("open_new_doc")
+
+        assertEquals(1, commands.commands?.size)
+        assertEquals("open_new_doc", commands.commands?.firstOrNull()?.name)
+        assertEquals("Create a new document.", commands.commands?.firstOrNull()?.description)
+        assertEquals("open_new_doc", detail.name)
+        assertEquals("message", detail.returns)
+        assertEquals("session", detail.tags?.firstOrNull())
+    }
+
+    @Test
+    fun `capabilities parse response and omit auth header when token blank`() = runBlocking {
+        ApiClient.setToken("")
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    "{" +
+                        "\"service\":\"ccc-freecad-remote\"," +
+                        "\"api_version\":\"v1\"," +
+                        "\"time_utc\":\"2024-01-01T00:00:00Z\"," +
+                        "\"auth\":{\"required\":true,\"scheme\":\"bearer\"}," +
+                        "\"version\":{\"name\":\"ccc\",\"version\":\"0.1.0\",\"git_sha\":null}," +
+                        "\"freecad\":{\"version\":\"1.0\"}," +
+                        "\"session\":{\"pid\":1234}," +
+                        "\"capabilities\":{" +
+                        "\"import_formats\":[\"fcstd\"]," +
+                        "\"export_formats\":[\"stl\"]," +
+                        "\"commands\":[\"open_new_doc\",\"recompute\"]," +
+                        "\"limits\":{\"max_upload_mb\":200}," +
+                        "\"features\":{\"model_browser\":true}" +
+                        "}" +
+                        "}"
+                )
+        )
+
+        val response = ApiClient.api.capabilities()
+
+        val request = server.takeRequest()
+        assertNull(request.getHeader("Authorization"))
+        assertEquals("ccc-freecad-remote", response.service)
+        assertEquals("v1", response.apiVersion)
+        assertEquals("fcstd", response.capabilities?.importFormats?.firstOrNull())
+        assertEquals(2, response.capabilities?.commands?.size)
+        assertEquals(true, response.capabilities?.features?.get("model_browser"))
+    }
 }
