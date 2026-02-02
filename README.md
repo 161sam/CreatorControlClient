@@ -117,7 +117,8 @@ export CCC_TOKEN="dev-token-change-me"
 ./run_dev.sh
 ```
 
-`CCC_TOKEN` is required and must be set before starting the server.
+`CCC_TOKEN` is required and must be set before starting the server. For
+backward compatibility you can also provide `api_token=...` in `server/.env`.
 
 Server runs on:
 
