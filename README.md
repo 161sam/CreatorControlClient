@@ -119,6 +119,8 @@ export CCC_TOKEN="dev-token-change-me"
 
 `CCC_TOKEN` is required and must be set before starting the server. For
 backward compatibility you can also provide `api_token=...` in `server/.env`.
+Optionally set `CCC_GIT_SHA` to expose the current build revision in `/api/v1/version`
+and `/api/v1/info`.
 
 Server runs on:
 
@@ -137,10 +139,21 @@ curl -i -H "Authorization: Bearer ${CCC_TOKEN}" \
   http://127.0.0.1:4828/api/v1/healthz
 ```
 
+Version and info (requires bearer token):
+
+```bash
+curl -i -H "Authorization: Bearer ${CCC_TOKEN}" \
+  http://127.0.0.1:4828/api/v1/version
+
+curl -i -H "Authorization: Bearer ${CCC_TOKEN}" \
+  http://127.0.0.1:4828/api/v1/info
+```
+
 Quick verification (starts server + runs checks):
 
 ```bash
 server/scripts/smoke_healthz.sh
+server/scripts/smoke_info.sh
 ```
 
 ### Android (local build)
