@@ -1,12 +1,15 @@
 package ccc.client
 
-import android.graphics.Color
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.graphics.Color
+import android.graphics.Typeface
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
@@ -27,25 +30,38 @@ class MainActivity : AppCompatActivity() {
 
     private val tag = "CCC"
     private var healthJob: Job? = null
+    private var lastInfo: InfoResponse? = null
+    private var lastVersion: VersionResponse? = null
+    private var lastAction: String? = null
+    private var lastActionSummary: String? = null
+    private val colorSuccess = Color.rgb(46, 125, 50)
+    private val colorError = Color.rgb(198, 40, 40)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        val titleView = TextView(this).apply {
+            text = "Server Status"
+            textSize = 20f
+            setTextColor(Color.BLACK)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, 0, 0, dp(12))
+        }
         val statusView = TextView(this).apply {
             text = "Connecting…"
             setTextColor(Color.GRAY)
             textSize = 24f
-            setPadding(0, 0, 0, 16)
+            setPadding(0, 0, 0, dp(8))
         }
         val detailsView = TextView(this).apply {
             textSize = 14f
             setTextColor(Color.DKGRAY)
-            setPadding(0, 0, 0, 16)
+            setPadding(0, 0, 0, dp(12))
         }
         val messageView = TextView(this).apply {
             textSize = 14f
             setTextColor(Color.BLACK)
-            setPadding(0, 0, 0, 24)
+            setPadding(0, 0, 0, dp(16))
         }
         val retryButton = Button(this).apply {
             text = "Retry"
@@ -59,11 +75,11 @@ class MainActivity : AppCompatActivity() {
             text = "Open Browser"
             isEnabled = true
         }
-        val buttonRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            addView(retryButton)
-            addView(copyButton)
-            addView(openBrowserButton)
+        val buttonColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(openBrowserButton, buttonLayoutParams())
+            addView(retryButton, buttonLayoutParams())
+            addView(copyButton, buttonLayoutParams())
         }
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -73,10 +89,12 @@ class MainActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT
             )
+            addView(titleView)
             addView(statusView)
             addView(detailsView)
             addView(messageView)
-            addView(buttonRow)
+            addView(buildDivider())
+            addView(buttonColumn)
         }
         setContentView(layout)
 
@@ -112,6 +130,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        lastAction = "healthz"
+        lastActionSummary = "starting"
         statusView.text = "Connecting…"
         statusView.setTextColor(Color.GRAY)
         messageView.text = ""
@@ -124,7 +144,7 @@ class MainActivity : AppCompatActivity() {
                 val res = withContext(Dispatchers.IO) { ApiClient.api.healthz() }
                 Log.i(tag, "healthz OK: $res")
                 statusView.text = "OK"
-                statusView.setTextColor(Color.rgb(46, 125, 50))
+                statusView.setTextColor(colorSuccess)
                 val messages = mutableListOf<String>()
                 messages.add("healthz: ok=${res.ok}")
                 val infoResult = fetchInfo()
@@ -133,11 +153,14 @@ class MainActivity : AppCompatActivity() {
                 messages.add(versionLine)
                 messages.addAll(infoLines)
                 messageView.text = messages.joinToString("\n")
+                lastActionSummary = "healthz ok, ${messages.firstOrNull() ?: "no details"}"
             } catch (e: Exception) {
                 Log.e(tag, "healthz failed", e)
                 statusView.text = "ERROR"
-                statusView.setTextColor(Color.rgb(198, 40, 40))
-                messageView.text = formatErrorMessage(e)
+                statusView.setTextColor(colorError)
+                val errorMessage = formatErrorMessage(e)
+                messageView.text = errorMessage
+                lastActionSummary = "healthz error: $errorMessage"
             } finally {
                 retryButton.isEnabled = true
                 copyButton.isEnabled = true
@@ -164,6 +187,7 @@ class MainActivity : AppCompatActivity() {
     private suspend fun fetchVersionLine(): String {
         return try {
             val version = withContext(Dispatchers.IO) { ApiClient.api.version() }
+            lastVersion = version
             formatVersionLine(version)
         } catch (e: Exception) {
             "version: ERROR ${formatErrorMessage(e)}"
@@ -173,6 +197,7 @@ class MainActivity : AppCompatActivity() {
     private suspend fun fetchInfo(): InfoResult {
         return try {
             val info = withContext(Dispatchers.IO) { ApiClient.api.info() }
+            lastInfo = info
             InfoResult(info = info, infoLines = formatInfoLines(info))
         } catch (e: Exception) {
             InfoResult(
@@ -201,6 +226,9 @@ class MainActivity : AppCompatActivity() {
     private fun formatErrorMessage(error: Exception): String {
         return if (error is HttpException) {
             val code = error.code()
+            if (code == 401) {
+                return "Token missing/invalid — set CCC_TOKEN in build config."
+            }
             val rawBody = runCatching { error.response()?.errorBody()?.string() }.getOrNull()
             val bodyText = rawBody?.takeIf { it.isNotBlank() } ?: "<no body>"
             "HTTP $code: ${truncate(bodyText, 200)}"
@@ -236,11 +264,24 @@ class MainActivity : AppCompatActivity() {
             "/api/v1/info",
             "/api/v1/version"
         )
+        val appVersion = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+        val deviceInfo = "${Build.MANUFACTURER} ${Build.MODEL} (SDK ${Build.VERSION.SDK_INT})"
+        val infoSummary = lastInfo?.let { formatInfoLines(it).joinToString("; ") } ?: "<none>"
+        val versionSummary = lastVersion?.let { formatVersionLine(it) } ?: "<none>"
         val messageText = messageView.text?.toString()?.trim().orEmpty()
         return buildString {
             appendLine("CCC diagnostics")
             appendLine("timestamp: $timestamp")
             appendLine("status: ${statusView.text}")
+            appendLine("app_version: $appVersion")
+            appendLine("device: $deviceInfo")
+            appendLine()
+            appendLine("last_action: ${lastAction ?: "<none>"}")
+            appendLine("last_action_summary: ${lastActionSummary ?: "<none>"}")
+            appendLine()
+            appendLine("server_info:")
+            appendLine("  info: $infoSummary")
+            appendLine("  version: $versionSummary")
             appendLine()
             appendLine("app_config:")
             detailsView.text?.toString()?.lines()?.forEach { line ->
@@ -260,6 +301,30 @@ class MainActivity : AppCompatActivity() {
             endpoints.forEach { endpoint ->
                 appendLine("  $endpoint")
             }
+        }
+    }
+
+    private fun dp(value: Int): Int {
+        val density = resources.displayMetrics.density
+        return (value * density).toInt()
+    }
+
+    private fun buttonLayoutParams(): LinearLayout.LayoutParams {
+        return LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply {
+            bottomMargin = dp(8)
+        }
+    }
+
+    private fun buildDivider(): View {
+        return View(this).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(1)
+            )
+            setBackgroundColor(Color.LTGRAY)
         }
     }
 
