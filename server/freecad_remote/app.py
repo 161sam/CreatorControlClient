@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import FastAPI, Depends, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -5,8 +7,9 @@ from pydantic import BaseModel
 from .security import require_token
 from .settings import settings
 from .runner import FreeCADRunner
-from .commands import exec_command, list_commands
+from .commands import exec_command
 from .files import save_upload, get_file_path
+from .version import get_version_payload
 
 app = FastAPI(title="ccc-freecad-remote", version="0.1.0")
 runner = FreeCADRunner()
@@ -26,6 +29,10 @@ class ImportReq(BaseModel):
 def healthz():
     return {"ok": True}
 
+@app.get("/api/v1/version", dependencies=[Depends(require_token)])
+def version():
+    return get_version_payload()
+
 @app.get("/api/v1/readyz")
 def readyz():
     if not runner.ping():
@@ -35,15 +42,14 @@ def readyz():
 @app.get("/api/v1/info", dependencies=[Depends(require_token)])
 def info():
     return {
-        "service": "ccc-freecad-remote",
-        "api_version": "v1",
-        "freecad": runner.get_freecad_info(),
-        "session": runner.get_session_info(),
-        "capabilities": {
-            "import_formats": ["stl", "obj", "step"],
-            "export_formats": ["stl", "step"],
-            "commands": list_commands(),
-        },
+        "bind_host": settings.bind_host,
+        "bind_port": settings.bind_port,
+        "storage_dir": settings.storage_dir,
+        "export_dir": settings.export_dir,
+        "freecad_cmd": settings.freecad_cmd,
+        "auth": {"required": True, "scheme": "bearer"},
+        "time_utc": datetime.now(timezone.utc).isoformat(),
+        "version": get_version_payload(),
     }
 
 @app.post("/api/v1/commands/exec", dependencies=[Depends(require_token)])
