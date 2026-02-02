@@ -1,34 +1,185 @@
 # Creator Control Client (CCC)
 
-**Creator Control Client (CCC)** ist eine Open-Source Android App,
-mit der du 3D-Modelle entdecken, ansehen und **echte Remote-Kontrolle**
-über Desktop-CAD-Software wie **FreeCAD** erhältst.
+**Creator Control Client (CCC)** is an open-source, privacy-first system for
+**remote control of creative desktop tools from mobile devices** – starting with **FreeCAD**.
 
-Kein Cloud-Zwang.  
-Kein Vendor-Lock-in.  
-Kein VNC-Lag.
+CCC is **not a cloud service**.  
+CCC is **not a remote desktop clone**.  
+CCC is a **creator-native control layer**.
 
-## Features (v0.1 – in Arbeit)
-- 🔍 Plattformübergreifende 3D-Modell-Suche
-- 👁️ Native 3D-Preview (STL, OBJ, GLTF)
-- 🎛️ Remote-Steuerung von FreeCAD
-- ⚡ Niedrige Latenz (Rust-basierter Stream)
-- 🔒 Self-hosted & privacy-first
+---
 
-## Warum CCC?
-Es gibt viele 3D-Viewer.
-Es gibt Remote-Desktop-Apps.
-Aber es gibt **keine** Open-Source App, die beides **Creator-gerecht**
-und **mobil-first** kombiniert.
+## What is CCC?
 
-CCC schließt diese Lücke.
+CCC consists of two main components:
 
-## Projektstatus
-🚧 Aktive Entwicklung (v0.1)
+1. **Android Client**
+   - Native Android app (Kotlin)
+   - Designed for creators, makers, engineers
+   - Mobile-first UI (not a shrunken desktop)
 
-## Mitmachen
-Contributions sind ausdrücklich willkommen.
-Bitte lies dazu `AGENTS.md`.
+2. **Self-hosted Control Server**
+   - Python + FastAPI
+   - Headless control of desktop tools (FreeCAD first)
+   - Explicit command API instead of screen streaming
 
-## Lizenz
-Apache-2.0 (geplant)
+The system allows you to **inspect, upload and control CAD projects remotely**
+without VNC, cloud lock-in or vendor dependencies.
+
+---
+
+## Current Status (v0.1)
+
+🚧 **Active development – technical foundation phase**
+
+### Implemented
+- ✅ FreeCAD Remote Control Server (FastAPI)
+- ✅ Token-based authentication
+- ✅ Health & info endpoints
+- ✅ Headless FreeCAD execution (`freecadcmd`)
+- ✅ Android app skeleton
+- ✅ Android ↔ Server connectivity (Retrofit + Moshi)
+- ✅ End-to-end health check from Android device
+
+### In Progress
+- ⏳ File upload → FreeCAD import pipeline
+- ⏳ Command whitelist execution
+- ⏳ Basic Android UI for server state & actions
+
+### Planned (later milestones)
+- ⏳ Native 3D preview (STL / OBJ)
+- ⏳ Remote render / stream experiments
+- ⏳ Multi-tool support (beyond FreeCAD)
+- ⏳ Rust-based low-latency streaming (research)
+
+---
+
+## Architecture (High Level)
+
+```text
+[ Android App ]
+      |
+      |  HTTPS (JSON, multipart)
+      v
+[ CCC Control Server ]
+      |
+      |  Headless CLI
+      v
+[ FreeCAD / Desktop Tools ]
+````
+
+**Key principle:**
+We control **intent**, not pixels.
+
+---
+
+## Why CCC?
+
+Most existing solutions fall into one of two categories:
+
+* 🖥️ Remote desktop tools (VNC, RDP)
+* ☁️ Cloud-based CAD platforms
+
+CCC deliberately chooses a third path:
+
+* No cloud dependency
+* No vendor lock-in
+* No screen scraping
+* Explicit, inspectable control APIs
+* Creator-owned infrastructure
+
+---
+
+## Repository Structure
+
+```text
+CreatorControlClient/
+├── android/        # Android client (Kotlin)
+├── server/         # FastAPI FreeCAD control server
+├── docs/           # API & design documentation
+├── scripts/        # Dev & automation scripts
+├── data/           # Runtime data (ignored by git)
+├── PROJECT.md
+├── ROADMAP.md
+├── AGENTS.md
+└── README.md
+```
+
+---
+
+## Development Setup
+
+### Server
+
+```bash
+cd server
+./run_dev.sh
+```
+
+Server runs on:
+
+```
+http://127.0.0.1:4828
+```
+
+### Android (local build)
+
+```bash
+cd android
+./gradlew :automotive:assembleDebug
+```
+
+### Android ↔ Server (USB, recommended)
+
+```bash
+adb reverse tcp:4828 tcp:4828
+```
+
+---
+
+## Contribution Rules
+
+CCC is designed to be developed collaboratively with **human contributors and AI agents**.
+
+Please read **AGENTS.md** before contributing.
+
+Key rules:
+
+* Small, focused changes
+* No features outside the current milestone
+* Keep `main` buildable at all times
+
+---
+
+## License
+
+Planned: **Apache-2.0**
+
+(Will be finalized before v1.0)
+
+---
+
+## Vision
+
+CCC aims to become a **modular control foundation** for creative software:
+
+* CAD
+* 3D tools
+* Media production
+* Fabrication pipelines
+
+All **offline-capable**, **self-hosted**, and **creator-controlled**.
+
+---
+
+If you are a:
+
+* maker
+* engineer
+* artist
+* or systems-minded creator
+
+…and you want **real control** over your tools again:
+
+**Welcome to CCC.**
+
