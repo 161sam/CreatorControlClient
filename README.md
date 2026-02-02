@@ -129,6 +129,29 @@ cd android
 ./gradlew :automotive:assembleDebug
 ```
 
+### Android Server Config (build-time)
+
+The Android client reads its server configuration from `BuildConfig` via `AppConfig`.
+To switch between USB reverse and LAN, update the build config fields in
+`android/automotive/build.gradle.kts`:
+
+```kotlin
+buildConfigField("String", "CCC_BASE_URL", "\"http://127.0.0.1:4828/\"")
+buildConfigField("String", "CCC_MODE", "\"usb\"")
+```
+
+**USB reverse (recommended):**
+
+* `CCC_BASE_URL`: `http://127.0.0.1:4828/`
+* `CCC_MODE`: `usb`
+
+**LAN mode (device → PC over WiFi):**
+
+* `CCC_BASE_URL`: `http://<YOUR_PC_IP>:4828/`
+* `CCC_MODE`: `lan`
+
+Note: the base URL must include the trailing `/` (Retrofit requirement).
+
 ### Android ↔ Server (USB, recommended)
 
 ```bash
@@ -182,4 +205,3 @@ If you are a:
 …and you want **real control** over your tools again:
 
 **Welcome to CCC.**
-
