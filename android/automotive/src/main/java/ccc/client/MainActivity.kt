@@ -4,8 +4,8 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import ccc.client.api.ApiClient
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -18,25 +18,21 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         val tv = TextView(this).apply {
-            text = "CCC: starting…"
+            text = "Connecting…"
             textSize = 18f
             setPadding(32, 32, 32, 32)
         }
         setContentView(tv)
 
-        CoroutineScope(Dispatchers.IO).launch {
+        lifecycleScope.launch {
             try {
-                val api = ApiClient.api
-                val res = api.healthz()
+                Log.i(tag, "healthz starting")
+                val res = withContext(Dispatchers.IO) { ApiClient.api.healthz() }
                 Log.i(tag, "healthz OK: $res")
-                withContext(Dispatchers.Main) {
-                    tv.text = "CCC: healthz OK\n$res"
-                }
+                tv.text = "OK: $res"
             } catch (e: Exception) {
                 Log.e(tag, "healthz failed", e)
-                withContext(Dispatchers.Main) {
-                    tv.text = "CCC: healthz FAILED\n${e.javaClass.simpleName}: ${e.message}"
-                }
+                tv.text = "ERROR: ${e.javaClass.simpleName}: ${e.message}"
             }
         }
     }
