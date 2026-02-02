@@ -117,6 +117,8 @@ export CCC_TOKEN="dev-token-change-me"
 ./run_dev.sh
 ```
 
+`CCC_TOKEN` is required and must be set before starting the server.
+
 Server runs on:
 
 ```
@@ -132,6 +134,12 @@ curl -i http://127.0.0.1:4828/api/v1/healthz
 # Valid token -> 200
 curl -i -H "Authorization: Bearer ${CCC_TOKEN}" \
   http://127.0.0.1:4828/api/v1/healthz
+```
+
+Quick verification (starts server + runs checks):
+
+```bash
+server/scripts/smoke_healthz.sh
 ```
 
 ### Android (local build)

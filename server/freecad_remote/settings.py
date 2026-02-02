@@ -1,5 +1,3 @@
-import os
-
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -12,8 +10,5 @@ class Settings(BaseSettings):
     storage_dir: str = "../data/uploads"
     export_dir: str = "../data/exports"
     freecad_cmd: str = "freecadcmd"
-
-if not os.getenv("CCC_TOKEN"):
-    raise RuntimeError("CCC_TOKEN is required. Set CCC_TOKEN before starting the server.")
 
 settings = Settings()
