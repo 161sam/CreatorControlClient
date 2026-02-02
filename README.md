@@ -205,6 +205,15 @@ adb reverse tcp:4828 tcp:4828
 
 Use USB reverse so the Android device can reach `127.0.0.1:4828` on your dev machine.
 
+### Test-Loop:
+
+   1. server/run_dev.sh
+   2. adb reverse tcp:4828 tcp:4828
+   3. ./gradlew :automotive:installDebug
+   4. monkey start
+   5. adb logcat
+
+
 ---
 
 ## Contribution Rules
