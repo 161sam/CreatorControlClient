@@ -1,0 +1,17 @@
+# CCC runtime data
+data/uploads/
+data/exports/
+server/.venv/
+
+# Android (future)
+*.iml
+.gradle/
+local.properties
+.idea/
+build/
+
+# Rust (future)
+target/
+
+# OS
+.DS_Store
