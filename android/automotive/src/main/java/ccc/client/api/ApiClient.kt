@@ -14,7 +14,10 @@ object ApiClient {
     // Für echtes Device (LAN): nimm deine PC-IP
     // Wenn du USB reverse nutzt: "http://127.0.0.1:4828/"
     // WICHTIG: Retrofit braucht trailing slash!
-    private const val BASE_URL = "http://127.0.0.1:4828/"
+    private const val DEFAULT_BASE_URL = "http://127.0.0.1:4828/"
+
+    @Volatile
+    private var baseUrl: String = DEFAULT_BASE_URL
 
     private val tokenProvider = InMemoryTokenProvider()
 
@@ -36,19 +39,24 @@ object ApiClient {
             .build()
     }
 
-    private val retrofit: Retrofit by lazy {
-        Retrofit.Builder()
-            .baseUrl(BASE_URL)
+    private fun createRetrofit(): Retrofit {
+        return Retrofit.Builder()
+            .baseUrl(baseUrl)
             .client(okHttp)
             .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
     }
 
-    val api: CccApi by lazy {
-        retrofit.create(CccApi::class.java)
-    }
+    @Volatile
+    var api: CccApi = createRetrofit().create(CccApi::class.java)
+        private set
 
     fun setToken(token: String?) {
         tokenProvider.setToken(token)
+    }
+
+    internal fun setBaseUrlForTests(url: String) {
+        baseUrl = url
+        api = createRetrofit().create(CccApi::class.java)
     }
 }
