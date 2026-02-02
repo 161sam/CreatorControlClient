@@ -18,7 +18,7 @@ object ApiClient {
     private val tokenProvider = InMemoryTokenProvider()
 
     private val logging: HttpLoggingInterceptor by lazy {
-        HttpLoggingInterceptor { message -> android.util.Log.d(TAG, message) }
+        HttpLoggingInterceptor { message -> logDebug(message) }
             .apply { level = HttpLoggingInterceptor.Level.BASIC }
     }
 
@@ -54,5 +54,13 @@ object ApiClient {
     internal fun setBaseUrlForTests(url: String) {
         baseUrl = url
         api = createRetrofit().create(CccApi::class.java)
+    }
+
+    private fun logDebug(message: String) {
+        runCatching {
+            val logClass = Class.forName("android.util.Log")
+            val method = logClass.getMethod("d", String::class.java, String::class.java)
+            method.invoke(null, TAG, message)
+        }
     }
 }
