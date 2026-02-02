@@ -16,6 +16,8 @@ object ApiClient {
     // WICHTIG: Retrofit braucht trailing slash!
     private const val BASE_URL = "http://127.0.0.1:4828/"
 
+    private val tokenProvider = InMemoryTokenProvider()
+
     private val logging: HttpLoggingInterceptor by lazy {
         HttpLoggingInterceptor { message -> android.util.Log.d(TAG, message) }
             .apply { level = HttpLoggingInterceptor.Level.BASIC }
@@ -23,6 +25,7 @@ object ApiClient {
 
     private val okHttp: OkHttpClient by lazy {
         OkHttpClient.Builder()
+            .addInterceptor(BearerTokenInterceptor(tokenProvider))
             .addInterceptor(logging)
             .build()
     }
@@ -43,5 +46,9 @@ object ApiClient {
 
     val api: CccApi by lazy {
         retrofit.create(CccApi::class.java)
+    }
+
+    fun setToken(token: String?) {
+        tokenProvider.setToken(token)
     }
 }
