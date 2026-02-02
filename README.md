@@ -149,11 +149,26 @@ curl -i -H "Authorization: Bearer ${CCC_TOKEN}" \
   http://127.0.0.1:4828/api/v1/info
 ```
 
+Capabilities and commands (requires bearer token):
+
+```bash
+curl -H "Authorization: Bearer ${CCC_TOKEN}" \
+  http://127.0.0.1:4828/api/v1/capabilities
+
+curl -H "Authorization: Bearer ${CCC_TOKEN}" \
+  http://127.0.0.1:4828/api/v1/commands
+```
+
+These endpoints are used by the Android app as a command/model browser across CAD
+backends. They expose available commands, formats, and session metadata without
+coupling the client to a specific CAD runtime.
+
 Quick verification (starts server + runs checks):
 
 ```bash
 server/scripts/smoke_healthz.sh
 server/scripts/smoke_info.sh
+server/scripts/smoke_capabilities.sh
 ```
 
 ### Android (local build)

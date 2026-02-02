@@ -7,12 +7,21 @@ from pydantic import BaseModel
 from .security import require_token
 from .settings import settings
 from .runner import FreeCADRunner
-from .commands import exec_command
+from .commands import exec_command, list_commands, get_commands_metadata, get_command_metadata
 from .files import save_upload, get_file_path
 from .version import get_version_payload
 
 app = FastAPI(title="ccc-freecad-remote", version="0.1.0")
 runner = FreeCADRunner()
+API_VERSION = "v1"
+SERVICE_NAME = "ccc-freecad-remote"
+IMPORT_FORMATS = ["fcstd", "step", "stl", "iges"]
+EXPORT_FORMATS = ["fcstd", "step", "stl", "iges", "obj"]
+CAPABILITY_LIMITS = {
+    "max_upload_mb": 200,
+    "max_export_mb": 200,
+    "max_job_seconds": 300,
+}
 
 class CommandReq(BaseModel):
     command: str
@@ -51,6 +60,40 @@ def info():
         "time_utc": datetime.now(timezone.utc).isoformat(),
         "version": get_version_payload(),
     }
+
+@app.get("/api/v1/capabilities", dependencies=[Depends(require_token)])
+def capabilities():
+    return {
+        "service": SERVICE_NAME,
+        "api_version": API_VERSION,
+        "time_utc": datetime.now(timezone.utc).isoformat(),
+        "auth": {"required": True, "scheme": "bearer"},
+        "version": get_version_payload(),
+        "freecad": runner.get_freecad_info(),
+        "session": runner.get_session_info(),
+        "capabilities": {
+            "import_formats": IMPORT_FORMATS,
+            "export_formats": EXPORT_FORMATS,
+            "commands": list_commands(),
+            "limits": CAPABILITY_LIMITS,
+            "features": {
+                "model_browser": True,
+                "remote_exec": True,
+                "batch_jobs": False,
+            },
+        },
+    }
+
+@app.get("/api/v1/commands", dependencies=[Depends(require_token)])
+def commands_list():
+    return {"commands": get_commands_metadata()}
+
+@app.get("/api/v1/commands/{name}", dependencies=[Depends(require_token)])
+def commands_get(name: str):
+    command = get_command_metadata(name)
+    if not command:
+        raise HTTPException(status_code=404, detail="command_not_found")
+    return command
 
 @app.post("/api/v1/commands/exec", dependencies=[Depends(require_token)])
 def commands_exec(req: CommandReq):
