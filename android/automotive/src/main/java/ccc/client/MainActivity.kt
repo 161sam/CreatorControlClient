@@ -1,6 +1,8 @@
 package ccc.client
 
 import android.graphics.Color
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
@@ -8,6 +10,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import ccc.client.api.ApiClient
@@ -47,6 +50,15 @@ class MainActivity : AppCompatActivity() {
             text = "Retry"
             isEnabled = false
         }
+        val copyButton = Button(this).apply {
+            text = "Copy diagnostics"
+            isEnabled = false
+        }
+        val buttonRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(retryButton)
+            addView(copyButton)
+        }
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(32, 32, 32, 32)
@@ -58,7 +70,7 @@ class MainActivity : AppCompatActivity() {
             addView(statusView)
             addView(detailsView)
             addView(messageView)
-            addView(retryButton)
+            addView(buttonRow)
         }
         setContentView(layout)
 
@@ -71,14 +83,21 @@ class MainActivity : AppCompatActivity() {
         Log.i(tag, "config mode=${AppConfig.mode} baseUrl=${AppConfig.baseUrl}")
 
         detailsView.text = buildConnectionDetails()
-        retryButton.setOnClickListener { runHealthCheck(statusView, messageView, retryButton) }
-        runHealthCheck(statusView, messageView, retryButton)
+        retryButton.setOnClickListener { runHealthCheck(statusView, messageView, retryButton, copyButton) }
+        copyButton.setOnClickListener {
+            if (healthJob?.isActive == true) {
+                return@setOnClickListener
+            }
+            copyDiagnostics(statusView, detailsView, messageView)
+        }
+        runHealthCheck(statusView, messageView, retryButton, copyButton)
     }
 
     private fun runHealthCheck(
         statusView: TextView,
         messageView: TextView,
-        retryButton: Button
+        retryButton: Button,
+        copyButton: Button
     ) {
         if (healthJob?.isActive == true) {
             return
@@ -88,6 +107,7 @@ class MainActivity : AppCompatActivity() {
         statusView.setTextColor(Color.GRAY)
         messageView.text = ""
         retryButton.isEnabled = false
+        copyButton.isEnabled = false
 
         healthJob = lifecycleScope.launch {
             try {
@@ -98,8 +118,11 @@ class MainActivity : AppCompatActivity() {
                 statusView.setTextColor(Color.rgb(46, 125, 50))
                 val messages = mutableListOf<String>()
                 messages.add("healthz: ok=${res.ok}")
-                messages.add(fetchVersionLine())
-                messages.addAll(fetchInfoLines())
+                val infoResult = fetchInfo()
+                val infoLines = infoResult.infoLines
+                val versionLine = infoResult.info?.version?.let { formatVersionLine(it) } ?: fetchVersionLine()
+                messages.add(versionLine)
+                messages.addAll(infoLines)
                 messageView.text = messages.joinToString("\n")
             } catch (e: Exception) {
                 Log.e(tag, "healthz failed", e)
@@ -108,6 +131,7 @@ class MainActivity : AppCompatActivity() {
                 messageView.text = formatErrorMessage(e)
             } finally {
                 retryButton.isEnabled = true
+                copyButton.isEnabled = true
                 healthJob = null
             }
         }
@@ -137,12 +161,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private suspend fun fetchInfoLines(): List<String> {
+    private suspend fun fetchInfo(): InfoResult {
         return try {
             val info = withContext(Dispatchers.IO) { ApiClient.api.info() }
-            formatInfoLines(info)
+            InfoResult(info = info, infoLines = formatInfoLines(info))
         } catch (e: Exception) {
-            listOf("info: ERROR ${formatErrorMessage(e)}")
+            InfoResult(
+                info = null,
+                infoLines = listOf("info: ERROR ${formatErrorMessage(e)}")
+            )
         }
     }
 
@@ -177,4 +204,58 @@ class MainActivity : AppCompatActivity() {
     private fun truncate(input: String, maxLength: Int): String {
         return if (input.length <= maxLength) input else input.take(maxLength) + "…"
     }
+
+    private fun copyDiagnostics(
+        statusView: TextView,
+        detailsView: TextView,
+        messageView: TextView
+    ) {
+        val diagnosticsText = buildDiagnosticsText(statusView, detailsView, messageView)
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        clipboard.setPrimaryClip(ClipData.newPlainText("CCC Diagnostics", diagnosticsText))
+        Toast.makeText(this, "Diagnostics copied to clipboard", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun buildDiagnosticsText(
+        statusView: TextView,
+        detailsView: TextView,
+        messageView: TextView
+    ): String {
+        val timestamp = java.time.ZonedDateTime.now().toString()
+        val endpoints = listOf(
+            "/api/v1/healthz",
+            "/api/v1/info",
+            "/api/v1/version"
+        )
+        val messageText = messageView.text?.toString()?.trim().orEmpty()
+        return buildString {
+            appendLine("CCC diagnostics")
+            appendLine("timestamp: $timestamp")
+            appendLine("status: ${statusView.text}")
+            appendLine()
+            appendLine("app_config:")
+            detailsView.text?.toString()?.lines()?.forEach { line ->
+                appendLine("  $line")
+            }
+            appendLine()
+            appendLine("messages:")
+            if (messageText.isBlank()) {
+                appendLine("  <none>")
+            } else {
+                messageText.lines().forEach { line ->
+                    appendLine("  $line")
+                }
+            }
+            appendLine()
+            appendLine("endpoints:")
+            endpoints.forEach { endpoint ->
+                appendLine("  $endpoint")
+            }
+        }
+    }
+
+    private data class InfoResult(
+        val info: InfoResponse?,
+        val infoLines: List<String>
+    )
 }

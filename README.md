@@ -194,8 +194,9 @@ For local debug builds, set `CCC_TOKEN` in your local
 real tokens).
 
 The Android start screen displays `/api/v1/healthz`, `/api/v1/version`, and
-`/api/v1/info` results. If `CCC_TOKEN` is empty, the app will receive 401
-responses for protected endpoints and surface the error in the UI.
+`/api/v1/info` results plus a "Copy diagnostics" button for bug reports. If
+`CCC_TOKEN` is empty, the app will receive 401 responses for protected
+endpoints and surface the error in the UI.
 
 ### Android ↔ Server (USB, recommended)
 

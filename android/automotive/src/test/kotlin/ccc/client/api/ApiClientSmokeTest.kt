@@ -82,6 +82,37 @@ class ApiClientSmokeTest {
     }
 
     @Test
+    fun `version and info do not send authorization header when token blank`() = runBlocking {
+        ApiClient.setToken("")
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody("{\"name\":\"CreatorControlServer\",\"version\":\"0.1.0-dev\",\"git_sha\":null}")
+        )
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setBody(
+                    "{" +
+                        "\"service\":\"CreatorControlServer\"," +
+                        "\"api_version\":\"v1\"," +
+                        "\"auth\":{\"required\":true,\"scheme\":\"bearer\"}," +
+                        "\"time_utc\":\"2024-01-01T00:00:00Z\"," +
+                        "\"version\":{\"name\":\"CreatorControlServer\",\"version\":\"0.1.0-dev\",\"git_sha\":null}" +
+                        "}"
+                )
+        )
+
+        ApiClient.api.version()
+        ApiClient.api.info()
+
+        val versionRequest = server.takeRequest()
+        assertNull(versionRequest.getHeader("Authorization"))
+        val infoRequest = server.takeRequest()
+        assertNull(infoRequest.getHeader("Authorization"))
+    }
+
+    @Test
     fun `parses version and info responses`() = runBlocking {
         server.enqueue(
             MockResponse()
