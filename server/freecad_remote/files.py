@@ -12,6 +12,7 @@ async def save_upload(file: UploadFile, storage_dir: str) -> dict:
     file_id = "file_" + uuid.uuid4().hex[:16]
     safe_name = (file.filename or "upload.bin").replace("/", "_").replace("\\", "_")
     out_path = os.path.join(storage_dir, file_id)
+    content_type = file.content_type or "application/octet-stream"
 
     sha256 = hashlib.sha256()
     size = 0
@@ -27,9 +28,11 @@ async def save_upload(file: UploadFile, storage_dir: str) -> dict:
 
     return {
         "file_id": file_id,
-        "name": safe_name,
+        "filename": safe_name,
+        "path": out_path,
         "size": size,
         "sha256": sha256.hexdigest(),
+        "mime": content_type,
     }
 
 def get_file_path(storage_dir: str, file_id: str) -> str | None:

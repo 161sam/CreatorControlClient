@@ -1,6 +1,9 @@
+import os
 from typing import Any
 
 from .runner import FreeCADRunner
+from .files import get_file_path
+from .settings import settings
 
 _COMMANDS: dict[str, dict[str, Any]] = {
     "open_new_doc": {
@@ -36,7 +39,31 @@ _COMMANDS: dict[str, dict[str, Any]] = {
         "returns": "message",
         "tags": ["file", "document"],
     },
+    "import_file": {
+        "name": "import_file",
+        "description": "Import an uploaded file into the current session.",
+        "args_schema": {
+            "type": "object",
+            "properties": {
+                "file_id": {"type": "string"},
+                "path": {"type": "string"},
+                "format": {"type": "string"},
+                "into_document": {"type": "string"},
+                "options": {"type": "object"},
+            },
+            "required": ["file_id"],
+            "additionalProperties": False,
+        },
+        "returns": "import_result",
+        "tags": ["file", "import"],
+    },
 }
+
+def _infer_format(path: str) -> str | None:
+    ext = os.path.splitext(path)[1].lower().lstrip(".")
+    if ext == "stp":
+        return "step"
+    return ext or None
 
 
 def list_commands() -> list[str]:
@@ -65,5 +92,38 @@ def exec_command(runner: FreeCADRunner, command: str, args: dict[str, Any]) -> d
     if command == "save_as":
         # args: {"path": "..."} - validated in runner/export layer later
         return {"message": "ok (v0.1 placeholder)"}
+    if command == "import_file":
+        file_id = args.get("file_id")
+        path = args.get("path")
+        if file_id:
+            path = get_file_path(settings.storage_dir, file_id)
+            if not path:
+                return {"status": "error", "error": "file_not_found", "file_id": file_id}
+        elif not path:
+            return {"status": "error", "error": "path_or_file_id_required"}
+
+        fmt = args.get("format") or _infer_format(path)
+        if not fmt:
+            return {"status": "error", "error": "format_required", "path": path}
+
+        into_document = args.get("into_document")
+        options = args.get("options") if isinstance(args.get("options"), dict) else {}
+        try:
+            result = runner.import_file(path, fmt, into_document, options)
+            return {
+                "status": "ok",
+                "result": result,
+                "file_id": file_id,
+                "path": path,
+                "format": fmt,
+            }
+        except Exception as exc:
+            return {
+                "status": "error",
+                "error": "import_failed",
+                "detail": str(exc),
+                "path": path,
+                "format": fmt,
+            }
 
     return {"message": "ok"}

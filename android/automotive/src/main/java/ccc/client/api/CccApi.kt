@@ -1,9 +1,12 @@
 package ccc.client.api
 
+import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import retrofit2.http.Body
 import retrofit2.http.GET
+import retrofit2.http.Multipart
 import retrofit2.http.POST
+import retrofit2.http.Part
 import retrofit2.http.Path
 
 interface CccApi {
@@ -30,4 +33,8 @@ interface CccApi {
 
     @POST("/api/v1/commands/exec")
     suspend fun execCommandRaw(@Body body: RequestBody): ExecCommandResponse
+
+    @Multipart
+    @POST("/api/v1/files/upload")
+    suspend fun upload(@Part file: MultipartBody.Part): UploadResponse
 }
