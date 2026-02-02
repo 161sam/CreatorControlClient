@@ -1,169 +1,120 @@
 package ccc.client
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Intent
-import android.graphics.Color
-import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import android.view.Gravity
-import android.view.View
-import android.view.ViewGroup
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
-import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import ccc.client.api.ApiClient
 import ccc.client.api.InfoResponse
 import ccc.client.api.VersionResponse
+import ccc.client.ui.CccApp
+import ccc.client.ui.HomeUiState
+import ccc.client.ui.StatusLevel
+import ccc.client.ui.theme.CccTheme
+import java.time.ZonedDateTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import retrofit2.HttpException
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : ComponentActivity() {
 
     private val tag = "CCC"
     private var healthJob: Job? = null
-    private var lastInfo: InfoResponse? = null
-    private var lastVersion: VersionResponse? = null
-    private var lastAction: String? = null
-    private var lastActionSummary: String? = null
-    private val colorSuccess = Color.rgb(46, 125, 50)
-    private val colorError = Color.rgb(198, 40, 40)
+    private var homeState by mutableStateOf(HomeUiState())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        val titleView = TextView(this).apply {
-            text = "Server Status"
-            textSize = 20f
-            setTextColor(Color.BLACK)
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, 0, 0, dp(12))
-        }
-        val statusView = TextView(this).apply {
-            text = "Connecting…"
-            setTextColor(Color.GRAY)
-            textSize = 24f
-            setPadding(0, 0, 0, dp(8))
-        }
-        val detailsView = TextView(this).apply {
-            textSize = 14f
-            setTextColor(Color.DKGRAY)
-            setPadding(0, 0, 0, dp(12))
-        }
-        val messageView = TextView(this).apply {
-            textSize = 14f
-            setTextColor(Color.BLACK)
-            setPadding(0, 0, 0, dp(16))
-        }
-        val retryButton = Button(this).apply {
-            text = "Retry"
-            isEnabled = false
-        }
-        val copyButton = Button(this).apply {
-            text = "Copy diagnostics"
-            isEnabled = false
-        }
-        val openBrowserButton = Button(this).apply {
-            text = "Open Browser"
-            isEnabled = true
-        }
-        val buttonColumn = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(openBrowserButton, buttonLayoutParams())
-            addView(retryButton, buttonLayoutParams())
-            addView(copyButton, buttonLayoutParams())
-        }
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(32, 32, 32, 32)
-            gravity = Gravity.START
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-            addView(titleView)
-            addView(statusView)
-            addView(detailsView)
-            addView(messageView)
-            addView(buildDivider())
-            addView(buttonColumn)
-        }
-        setContentView(layout)
 
         if (AppConfig.token.isNotBlank()) {
             ApiClient.setToken(AppConfig.token)
             Log.i(tag, "auth enabled")
         } else {
+            ApiClient.setToken(null)
             Log.i(tag, "auth disabled")
         }
         Log.i(tag, "config mode=${AppConfig.mode} baseUrl=${AppConfig.baseUrl}")
 
-        detailsView.text = buildConnectionDetails()
-        retryButton.setOnClickListener { runHealthCheck(statusView, messageView, retryButton, copyButton) }
-        copyButton.setOnClickListener {
-            if (healthJob?.isActive == true) {
-                return@setOnClickListener
+        homeState = homeState.copy(detailsText = buildConnectionDetails())
+
+        setContent {
+            CccTheme {
+                CccApp(
+                    homeState = homeState,
+                    diagnosticsProvider = { buildDiagnosticsText(homeState) },
+                    onRetry = { runHealthCheck() },
+                    onOpenBrowserActivity = {
+                        startActivity(Intent(this, BrowserActivity::class.java))
+                    }
+                )
             }
-            copyDiagnostics(statusView, detailsView, messageView)
         }
-        openBrowserButton.setOnClickListener {
-            startActivity(Intent(this, BrowserActivity::class.java))
-        }
-        runHealthCheck(statusView, messageView, retryButton, copyButton)
+
+        runHealthCheck()
     }
 
-    private fun runHealthCheck(
-        statusView: TextView,
-        messageView: TextView,
-        retryButton: Button,
-        copyButton: Button
-    ) {
+    private fun runHealthCheck() {
         if (healthJob?.isActive == true) {
             return
         }
 
-        lastAction = "healthz"
-        lastActionSummary = "starting"
-        statusView.text = "Connecting…"
-        statusView.setTextColor(Color.GRAY)
-        messageView.text = ""
-        retryButton.isEnabled = false
-        copyButton.isEnabled = false
+        homeState = homeState.copy(
+            statusText = "Connecting…",
+            statusLevel = StatusLevel.Neutral,
+            messageLines = emptyList(),
+            isLoading = true,
+            lastAction = "healthz",
+            lastActionSummary = "starting"
+        )
 
         healthJob = lifecycleScope.launch {
             try {
                 Log.i(tag, "healthz starting")
                 val res = withContext(Dispatchers.IO) { ApiClient.api.healthz() }
                 Log.i(tag, "healthz OK: $res")
-                statusView.text = "OK"
-                statusView.setTextColor(colorSuccess)
                 val messages = mutableListOf<String>()
                 messages.add("healthz: ok=${res.ok}")
                 val infoResult = fetchInfo()
                 val infoLines = infoResult.infoLines
-                val versionLine = infoResult.info?.version?.let { formatVersionLine(it) } ?: fetchVersionLine()
+                var infoSummary = homeState.infoSummary
+                infoResult.infoSummary?.let { infoSummary = it }
+
+                var versionSummary = homeState.versionSummary
+                val versionLine = infoResult.info?.version?.let { formatVersionLine(it) } ?: run {
+                    val versionResult = fetchVersionLine()
+                    versionResult.summary?.let { versionSummary = it }
+                    versionResult.line
+                }
                 messages.add(versionLine)
                 messages.addAll(infoLines)
-                messageView.text = messages.joinToString("\n")
-                lastActionSummary = "healthz ok, ${messages.firstOrNull() ?: "no details"}"
+
+                homeState = homeState.copy(
+                    statusText = "OK",
+                    statusLevel = StatusLevel.Ok,
+                    messageLines = messages,
+                    isLoading = false,
+                    lastActionSummary = "healthz ok, ${messages.firstOrNull() ?: "no details"}",
+                    infoSummary = infoSummary,
+                    versionSummary = versionSummary
+                )
             } catch (e: Exception) {
                 Log.e(tag, "healthz failed", e)
-                statusView.text = "ERROR"
-                statusView.setTextColor(colorError)
                 val errorMessage = formatErrorMessage(e)
-                messageView.text = errorMessage
-                lastActionSummary = "healthz error: $errorMessage"
+                homeState = homeState.copy(
+                    statusText = "ERROR",
+                    statusLevel = StatusLevel.Error,
+                    messageLines = listOf(errorMessage),
+                    isLoading = false,
+                    lastActionSummary = "healthz error: $errorMessage"
+                )
             } finally {
-                retryButton.isEnabled = true
-                copyButton.isEnabled = true
                 healthJob = null
             }
         }
@@ -184,25 +135,26 @@ class MainActivity : AppCompatActivity() {
         return "****$suffix"
     }
 
-    private suspend fun fetchVersionLine(): String {
+    private suspend fun fetchVersionLine(): VersionResult {
         return try {
             val version = withContext(Dispatchers.IO) { ApiClient.api.version() }
-            lastVersion = version
-            formatVersionLine(version)
+            val line = formatVersionLine(version)
+            VersionResult(line = line, summary = line)
         } catch (e: Exception) {
-            "version: ERROR ${formatErrorMessage(e)}"
+            VersionResult(line = "version: ERROR ${formatErrorMessage(e)}", summary = null)
         }
     }
 
     private suspend fun fetchInfo(): InfoResult {
         return try {
             val info = withContext(Dispatchers.IO) { ApiClient.api.info() }
-            lastInfo = info
-            InfoResult(info = info, infoLines = formatInfoLines(info))
+            val infoLines = formatInfoLines(info)
+            InfoResult(info = info, infoLines = infoLines, infoSummary = infoLines.joinToString("; "))
         } catch (e: Exception) {
             InfoResult(
                 info = null,
-                infoLines = listOf("info: ERROR ${formatErrorMessage(e)}")
+                infoLines = listOf("info: ERROR ${formatErrorMessage(e)}"),
+                infoSummary = null
             )
         }
     }
@@ -242,23 +194,8 @@ class MainActivity : AppCompatActivity() {
         return if (input.length <= maxLength) input else input.take(maxLength) + "…"
     }
 
-    private fun copyDiagnostics(
-        statusView: TextView,
-        detailsView: TextView,
-        messageView: TextView
-    ) {
-        val diagnosticsText = buildDiagnosticsText(statusView, detailsView, messageView)
-        val clipboard = getSystemService(ClipboardManager::class.java)
-        clipboard.setPrimaryClip(ClipData.newPlainText("CCC Diagnostics", diagnosticsText))
-        Toast.makeText(this, "Diagnostics copied to clipboard", Toast.LENGTH_SHORT).show()
-    }
-
-    private fun buildDiagnosticsText(
-        statusView: TextView,
-        detailsView: TextView,
-        messageView: TextView
-    ): String {
-        val timestamp = java.time.ZonedDateTime.now().toString()
+    private fun buildDiagnosticsText(state: HomeUiState): String {
+        val timestamp = ZonedDateTime.now().toString()
         val endpoints = listOf(
             "/api/v1/healthz",
             "/api/v1/info",
@@ -266,25 +203,23 @@ class MainActivity : AppCompatActivity() {
         )
         val appVersion = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
         val deviceInfo = "${Build.MANUFACTURER} ${Build.MODEL} (SDK ${Build.VERSION.SDK_INT})"
-        val infoSummary = lastInfo?.let { formatInfoLines(it).joinToString("; ") } ?: "<none>"
-        val versionSummary = lastVersion?.let { formatVersionLine(it) } ?: "<none>"
-        val messageText = messageView.text?.toString()?.trim().orEmpty()
+        val messageText = state.messageLines.joinToString("\n").trim()
         return buildString {
             appendLine("CCC diagnostics")
             appendLine("timestamp: $timestamp")
-            appendLine("status: ${statusView.text}")
+            appendLine("status: ${state.statusText}")
             appendLine("app_version: $appVersion")
             appendLine("device: $deviceInfo")
             appendLine()
-            appendLine("last_action: ${lastAction ?: "<none>"}")
-            appendLine("last_action_summary: ${lastActionSummary ?: "<none>"}")
+            appendLine("last_action: ${state.lastAction ?: "<none>"}")
+            appendLine("last_action_summary: ${state.lastActionSummary ?: "<none>"}")
             appendLine()
             appendLine("server_info:")
-            appendLine("  info: $infoSummary")
-            appendLine("  version: $versionSummary")
+            appendLine("  info: ${state.infoSummary}")
+            appendLine("  version: ${state.versionSummary}")
             appendLine()
             appendLine("app_config:")
-            detailsView.text?.toString()?.lines()?.forEach { line ->
+            state.detailsText.lines().forEach { line ->
                 appendLine("  $line")
             }
             appendLine()
@@ -304,32 +239,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun dp(value: Int): Int {
-        val density = resources.displayMetrics.density
-        return (value * density).toInt()
-    }
-
-    private fun buttonLayoutParams(): LinearLayout.LayoutParams {
-        return LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply {
-            bottomMargin = dp(8)
-        }
-    }
-
-    private fun buildDivider(): View {
-        return View(this).apply {
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(1)
-            )
-            setBackgroundColor(Color.LTGRAY)
-        }
-    }
-
     private data class InfoResult(
         val info: InfoResponse?,
-        val infoLines: List<String>
+        val infoLines: List<String>,
+        val infoSummary: String?
+    )
+
+    private data class VersionResult(
+        val line: String,
+        val summary: String?
     )
 }

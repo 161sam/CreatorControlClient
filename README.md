@@ -233,6 +233,8 @@ cd android
 ./gradlew :automotive:assembleDebug
 ```
 
+The automotive UI is now built with Jetpack Compose (Material 3) and a bottom navigation layout.
+
 ### Android Server Config (build-time)
 
 The Android client reads its server configuration from `BuildConfig` via `AppConfig`.
