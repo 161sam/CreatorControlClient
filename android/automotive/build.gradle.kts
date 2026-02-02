@@ -14,6 +14,9 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        buildConfigField("String", "CCC_BASE_URL", "\"http://127.0.0.1:4828/\"")
+        buildConfigField("String", "CCC_MODE", "\"usb\"")
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -25,6 +28,9 @@ android {
                 "proguard-rules.pro"
             )
         }
+    }
+    buildFeatures {
+        buildConfig = true
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

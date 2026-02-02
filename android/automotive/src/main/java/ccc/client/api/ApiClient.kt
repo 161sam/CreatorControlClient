@@ -1,5 +1,6 @@
 package ccc.client.api
 
+import ccc.client.AppConfig
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import okhttp3.OkHttpClient
@@ -11,13 +12,8 @@ object ApiClient {
 
     private const val TAG = "CCC"
 
-    // Für echtes Device (LAN): nimm deine PC-IP
-    // Wenn du USB reverse nutzt: "http://127.0.0.1:4828/"
-    // WICHTIG: Retrofit braucht trailing slash!
-    private const val DEFAULT_BASE_URL = "http://127.0.0.1:4828/"
-
     @Volatile
-    private var baseUrl: String = DEFAULT_BASE_URL
+    private var baseUrl: String = AppConfig.baseUrl
 
     private val tokenProvider = InMemoryTokenProvider()
 
