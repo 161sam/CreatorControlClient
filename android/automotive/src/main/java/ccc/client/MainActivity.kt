@@ -26,7 +26,8 @@ class MainActivity : AppCompatActivity() {
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val res = ApiClient.api.healthz()
+                val api = ApiClient.api
+                val res = api.healthz()
                 Log.i(tag, "healthz OK: $res")
                 withContext(Dispatchers.Main) {
                     tv.text = "CCC: healthz OK\n$res"
