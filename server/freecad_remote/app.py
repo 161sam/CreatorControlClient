@@ -22,7 +22,7 @@ class ImportReq(BaseModel):
     into_document: str | None = None
     options: dict = {}
 
-@app.get("/api/v1/healthz")
+@app.get("/api/v1/healthz", dependencies=[Depends(require_token)])
 def healthz():
     return {"ok": True}
 

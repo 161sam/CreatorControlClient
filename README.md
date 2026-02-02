@@ -113,6 +113,7 @@ CreatorControlClient/
 
 ```bash
 cd server
+export CCC_TOKEN="dev-token-change-me"
 ./run_dev.sh
 ```
 
@@ -120,6 +121,17 @@ Server runs on:
 
 ```
 http://127.0.0.1:4828
+```
+
+Health check (requires bearer token):
+
+```bash
+# Missing token -> 401
+curl -i http://127.0.0.1:4828/api/v1/healthz
+
+# Valid token -> 200
+curl -i -H "Authorization: Bearer ${CCC_TOKEN}" \
+  http://127.0.0.1:4828/api/v1/healthz
 ```
 
 ### Android (local build)
@@ -157,6 +169,8 @@ Note: the base URL must include the trailing `/` (Retrofit requirement).
 ```bash
 adb reverse tcp:4828 tcp:4828
 ```
+
+Use USB reverse so the Android device can reach `127.0.0.1:4828` on your dev machine.
 
 ---
 

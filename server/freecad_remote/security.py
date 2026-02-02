@@ -6,4 +6,4 @@ def require_token(authorization: str | None = Header(default=None)):
         raise HTTPException(status_code=401, detail="missing token")
     token = authorization.removeprefix("Bearer ").strip()
     if token != settings.api_token:
-        raise HTTPException(status_code=403, detail="invalid token")
+        raise HTTPException(status_code=401, detail="invalid token")
