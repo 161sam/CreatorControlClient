@@ -70,3 +70,89 @@ CAD Control
 - Engineers & Designers
 - OSS-Communities
 - Privacy-first Nutzer
+
+
+---
+
+# Creator Control Client (CCC)
+
+## Project Status
+
+Version: v0.1 (MVP)
+Status: active development
+License: Apache-2.0 (proposed)
+
+## Vision
+
+Creator Control Client (CCC) is an **open-source Android client app** for 3D creators that combines **model browsing, 3D preview, and true remote control of CAD software** in a single, privacy-friendly application.
+
+CCC is **offline-first**, **self-hosted-first**, and built with a modular architecture.
+It is aimed at makers, engineers, artists, and researchers.
+
+## Core Idea
+
+CCC connects three previously separate worlds:
+
+1. 3D model platforms (discovery & preview)
+2. Desktop CAD software (FreeCAD, Blender)
+3. Mobile control with low latency
+
+## Focus of v0.1 (MVP)
+
+The focus of v0.1 is **exclusively** on:
+
+* 3D model discovery + preview (OSS)
+* True remote access to **FreeCAD**
+* Low latency (no classic VNC/RDP)
+* Fully open source
+* Local / self-hosted infrastructure
+
+## Explicitly NOT Part of v0.1
+
+* ❌ Bambu Studio control
+* ❌ Slicing / printing
+* ❌ Wiki / RAG / knowledge base
+* ❌ Cloud accounts or sync
+* ❌ Mesh / multi-node support
+
+These items are **intentionally postponed**, not discarded.
+
+## Goal of v0.1
+
+> “I can find a 3D model on my smartphone,
+> view it, and **edit it directly in FreeCAD on a remote machine**.”
+
+If this goal is achieved, v0.1 is considered successful.
+
+## Architecture (High Level)
+
+**Android App**
+
+* UI: Kotlin / Jetpack Compose
+* 3D Preview: OpenGL (fork of an OSS viewer)
+* Storage: local (Room DB)
+
+**Remote Layer**
+
+* Low-latency stream: Rust-based client
+* Input handling: touch → mouse / keyboard
+
+**CAD Control**
+
+* FreeCAD Python API server (remote)
+* Command execution (safe subset)
+
+## Open-Source Principles
+
+* No tracking
+* No telemetry
+* No proprietary SDKs
+* Fork-friendly
+* Documented APIs
+
+## Target Audience
+
+* Makers & 3D printing enthusiasts
+* Engineers & designers
+* OSS communities
+* Privacy-first users
