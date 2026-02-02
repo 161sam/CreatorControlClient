@@ -16,6 +16,11 @@ pip install -r requirements.txt
 
 export CCC_TOKEN="test-token"
 
+if ! command -v freecadcmd >/dev/null 2>&1; then
+  echo "freecadcmd not found; skipping upload/import smoke."
+  exit 0
+fi
+
 uvicorn freecad_remote.app:app --host 127.0.0.1 --port 4828 &
 SERVER_PID=$!
 

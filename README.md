@@ -1,5 +1,15 @@
 # Creator Control Client (CCC)
 
+CCC is a **local-first control layer** for creative desktop tools. It lets an Android device
+talk to a self-hosted server that exposes explicit command APIs (starting with FreeCAD).
+No cloud, no screen scraping—just inspectable, user-owned control. 
+
+**Features**
+- Android Automotive client with command browser and diagnostics
+- FastAPI control server with token auth
+- File upload/import and export/download workflows
+- Explicit health/info/version endpoints for verification
+
 **Creator Control Client (CCC)** is an open-source, privacy-first system for
 **remote control of creative desktop tools from mobile devices** – starting with **FreeCAD**.
 
@@ -107,6 +117,46 @@ CreatorControlClient/
 
 ---
 
+## Quickstart (5 minutes)
+
+1. **Start the server**
+
+   ```bash
+   cd server
+   CCC_TOKEN=dev-token-change-me ./run_dev.sh
+   ```
+
+2. **Enable USB reverse (Android ↔ PC)**
+
+   ```bash
+   adb reverse tcp:4828 tcp:4828
+   ```
+
+3. **Install and run the Android app**
+
+   ```bash
+   cd android
+   ./gradlew :automotive:assembleDebug
+   ```
+
+4. **Verify in the UI**
+   - Healthz / Info / Version show green status
+   - Run a command (e.g. `open_new_doc`)
+   - Upload → Import
+   - Export → Download
+
+---
+
+## Common Issues
+
+- **401 Unauthorized**: token missing or invalid. Set `CCC_TOKEN` for the server and update
+  `CCC_TOKEN` in the Android build config fields.
+- **`adb reverse` not set**: ensure `adb reverse tcp:4828 tcp:4828` is active for USB mode.
+- **Port already in use**: stop the other process or change the port in server settings.
+- **FreeCAD not found**: install `freecadcmd` or set `freecad_cmd` in `server/.env`.
+
+---
+
 ## Development Setup
 
 ### Server
@@ -198,6 +248,7 @@ buildConfigField("String", "CCC_TOKEN", "\"\"")
 **USB reverse (recommended):**
 
 * `CCC_BASE_URL`: `http://127.0.0.1:4828/`
+
 * `CCC_MODE`: `usb`
 * `CCC_TOKEN`: (optional, required for current `/api/v1/healthz`)
 
@@ -344,3 +395,13 @@ If you are a:
 …and you want **real control** over your tools again:
 
 **Welcome to CCC.**
+
+---
+
+## Repository Metadata (GitHub)
+
+**Suggested description**
+> Local-first Android + FastAPI control layer for FreeCAD (command APIs, no cloud).
+
+**Suggested topics**
+`android`, `android-automotive`, `fastapi`, `freecad`, `remote-control`, `cad`, `offline-first`

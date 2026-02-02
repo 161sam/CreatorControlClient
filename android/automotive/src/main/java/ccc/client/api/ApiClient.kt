@@ -9,6 +9,7 @@ import okhttp3.Response
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
+import java.util.concurrent.TimeUnit
 
 object ApiClient {
 
@@ -28,6 +29,9 @@ object ApiClient {
         OkHttpClient.Builder()
             .addInterceptor(BearerTokenInterceptor(tokenProvider))
             .addInterceptor(logging)
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
             .build()
     }
 

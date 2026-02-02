@@ -7,6 +7,7 @@ import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
 import android.view.View
@@ -30,7 +31,9 @@ import ccc.client.api.CommandsResponse
 import ccc.client.api.ExportResponse
 import ccc.client.api.ExecCommandRequest
 import ccc.client.api.ExecCommandResponse
+import ccc.client.api.InfoResponse
 import ccc.client.api.UploadResponse
+import ccc.client.api.VersionResponse
 import ccc.client.api.parseExportResponse
 import ccc.client.api.parseArgsSchema
 import com.squareup.moshi.Moshi
@@ -72,6 +75,9 @@ class BrowserActivity : AppCompatActivity() {
     private var lastExecRequestPayload: String? = null
     private var lastExecResponsePayload: String? = null
     private var lastExecHttpStatus: String? = null
+    private var lastExecStdout: String? = null
+    private var lastExecStderr: String? = null
+    private var lastExecDurationMs: String? = null
     private var selectedFile: SelectedFileInfo? = null
     private var lastUploadRequestPayload: String? = null
     private var lastUploadResponsePayload: String? = null
@@ -85,6 +91,14 @@ class BrowserActivity : AppCompatActivity() {
     private var lastExportHttpStatus: String? = null
     private var lastExportResponse: ExportResponse? = null
     private var lastExportDownloadStatus: String? = null
+    private var lastInfo: InfoResponse? = null
+    private var lastVersion: VersionResponse? = null
+    private var lastAction: String? = null
+    private var lastActionSummary: String? = null
+    private val colorSuccess = Color.rgb(46, 125, 50)
+    private val colorError = Color.rgb(198, 40, 40)
+    private val colorWarning = Color.rgb(245, 124, 0)
+    private val maxSnippetLength = 800
 
     private val moshi: Moshi by lazy {
         Moshi.Builder()
@@ -112,39 +126,47 @@ class BrowserActivity : AppCompatActivity() {
             ApiClient.setToken(null)
         }
 
+        val titleView = TextView(this).apply {
+            text = "Browser"
+            textSize = 20f
+            setTextColor(Color.BLACK)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, 0, 0, dp(12))
+        }
         val statusView = TextView(this).apply {
             text = "Loading…"
             setTextColor(Color.GRAY)
             textSize = 22f
-            setPadding(0, 0, 0, 12)
+            setPadding(0, 0, 0, dp(8))
         }
         val detailsView = TextView(this).apply {
             textSize = 14f
             setTextColor(Color.DKGRAY)
-            setPadding(0, 0, 0, 16)
+            setPadding(0, 0, 0, dp(12))
             text = buildConnectionDetails()
         }
         val messageView = TextView(this).apply {
             textSize = 14f
             setTextColor(Color.BLACK)
-            setPadding(0, 0, 0, 16)
+            setPadding(0, 0, 0, dp(12))
         }
         val reloadButton = Button(this).apply {
-            text = "Reload"
+            text = "Refresh"
         }
         val copyButton = Button(this).apply {
-            text = "Copy browser diagnostics"
+            text = "Copy diagnostics"
         }
-        val buttonRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            addView(reloadButton)
-            addView(copyButton)
+        val buttonColumn = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(reloadButton, buttonLayoutParams())
+            addView(copyButton, buttonLayoutParams())
         }
         val filesTitle = TextView(this).apply {
             text = "Files"
-            textSize = 16f
+            textSize = 18f
             setTextColor(Color.BLACK)
-            setPadding(0, 8, 0, 8)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(8), 0, dp(8))
         }
         val pickFileButton = Button(this).apply {
             text = "Pick file"
@@ -160,34 +182,49 @@ class BrowserActivity : AppCompatActivity() {
         val fileStatusView = TextView(this).apply {
             textSize = 14f
             setTextColor(Color.DKGRAY)
-            setPadding(0, 0, 0, 8)
+            setPadding(0, 0, 0, dp(6))
             text = "No file selected."
         }
         val uploadStatusView = TextView(this).apply {
             textSize = 14f
             setTextColor(Color.BLACK)
-            setPadding(0, 0, 0, 8)
+            setPadding(0, 0, 0, dp(4))
+        }
+        val uploadDetailView = TextView(this).apply {
+            textSize = 12f
+            setTextColor(Color.DKGRAY)
+            typeface = Typeface.MONOSPACE
+            setPadding(0, 0, 0, dp(8))
         }
         val importStatusView = TextView(this).apply {
             textSize = 14f
             setTextColor(Color.BLACK)
-            setPadding(0, 0, 0, 8)
+            setPadding(0, 0, 0, dp(4))
+        }
+        val importDetailView = TextView(this).apply {
+            textSize = 12f
+            setTextColor(Color.DKGRAY)
+            typeface = Typeface.MONOSPACE
+            setPadding(0, 0, 0, dp(8))
         }
         val filesContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(filesTitle)
-            addView(pickFileButton)
+            addView(pickFileButton, buttonLayoutParams())
             addView(fileStatusView)
-            addView(uploadButton)
+            addView(uploadButton, buttonLayoutParams())
             addView(uploadStatusView)
-            addView(importButton)
+            addView(uploadDetailView)
+            addView(importButton, buttonLayoutParams())
             addView(importStatusView)
+            addView(importDetailView)
         }
         val exportsTitle = TextView(this).apply {
             text = "Exports"
-            textSize = 16f
+            textSize = 18f
             setTextColor(Color.BLACK)
-            setPadding(0, 16, 0, 8)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(16), 0, dp(8))
         }
         val exportStlButton = Button(this).apply {
             text = "Export STL"
@@ -197,20 +234,20 @@ class BrowserActivity : AppCompatActivity() {
         }
         val exportButtonRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            addView(exportStlButton)
-            addView(exportStepButton)
+            addView(exportStlButton, weightedButtonLayoutParams())
+            addView(exportStepButton, weightedButtonLayoutParams())
         }
         val exportStatusView = TextView(this).apply {
             textSize = 14f
             setTextColor(Color.BLACK)
-            setPadding(0, 0, 0, 8)
+            setPadding(0, 0, 0, dp(4))
             text = "No export requested yet."
         }
         val exportResultView = TextView(this).apply {
             textSize = 13f
             setTextColor(Color.DKGRAY)
             typeface = Typeface.MONOSPACE
-            setPadding(0, 0, 0, 8)
+            setPadding(0, 0, 0, dp(8))
         }
         val exportDownloadButton = Button(this).apply {
             text = "Download"
@@ -222,8 +259,8 @@ class BrowserActivity : AppCompatActivity() {
         }
         val exportActionsRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            addView(exportDownloadButton)
-            addView(exportCopyLinkButton)
+            addView(exportDownloadButton, weightedButtonLayoutParams())
+            addView(exportCopyLinkButton, weightedButtonLayoutParams())
         }
         val exportsContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -235,8 +272,24 @@ class BrowserActivity : AppCompatActivity() {
         }
         pickFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) {
-                handlePickedFile(uri, fileStatusView, uploadStatusView, importStatusView, uploadButton, importButton)
+                handlePickedFile(
+                    uri,
+                    fileStatusView,
+                    uploadStatusView,
+                    uploadDetailView,
+                    importStatusView,
+                    importDetailView,
+                    uploadButton,
+                    importButton
+                )
             }
+        }
+        val browserTitle = TextView(this).apply {
+            text = "Capabilities & Commands"
+            textSize = 18f
+            setTextColor(Color.BLACK)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(12), 0, dp(8))
         }
         val capabilitiesButton = Button(this).apply {
             text = "Capabilities"
@@ -246,41 +299,49 @@ class BrowserActivity : AppCompatActivity() {
         }
         val sectionRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            addView(capabilitiesButton)
-            addView(commandsButton)
+            addView(capabilitiesButton, weightedButtonLayoutParams())
+            addView(commandsButton, weightedButtonLayoutParams())
         }
 
         val contentLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, 16, 0, 16)
+            setPadding(0, dp(12), 0, dp(16))
         }
         val capabilitiesView = TextView(this).apply {
             textSize = 14f
             setTextColor(Color.BLACK)
+            typeface = Typeface.MONOSPACE
         }
         val commandsContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
         }
         val commandDetailTitle = TextView(this).apply {
             text = "Command Detail"
-            textSize = 16f
+            textSize = 18f
             setTextColor(Color.BLACK)
-            setPadding(0, 16, 0, 8)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(16), 0, dp(8))
         }
         val commandDetailView = TextView(this).apply {
             textSize = 14f
             setTextColor(Color.BLACK)
+            typeface = Typeface.MONOSPACE
+        }
+        val retryCommandButton = Button(this).apply {
+            text = "Retry command detail"
+            visibility = View.GONE
         }
         val argsTitle = TextView(this).apply {
             text = "Arguments"
-            textSize = 16f
+            textSize = 18f
             setTextColor(Color.BLACK)
-            setPadding(0, 16, 0, 8)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(16), 0, dp(8))
         }
         val argsHintView = TextView(this).apply {
             textSize = 14f
             setTextColor(Color.DKGRAY)
-            setPadding(0, 0, 0, 8)
+            setPadding(0, 0, 0, dp(8))
         }
         val argsContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -303,14 +364,20 @@ class BrowserActivity : AppCompatActivity() {
         }
         val resultTitle = TextView(this).apply {
             text = "Result"
-            textSize = 16f
+            textSize = 18f
             setTextColor(Color.BLACK)
-            setPadding(0, 16, 0, 8)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(16), 0, dp(8))
         }
         val resultStatus = TextView(this).apply {
             textSize = 14f
             setTextColor(Color.BLACK)
-            setPadding(0, 0, 0, 8)
+            setPadding(0, 0, 0, dp(4))
+        }
+        val resultMeta = TextView(this).apply {
+            textSize = 12f
+            setTextColor(Color.DKGRAY)
+            setPadding(0, 0, 0, dp(8))
         }
         val stdoutLabel = TextView(this).apply {
             text = "stdout"
@@ -321,7 +388,7 @@ class BrowserActivity : AppCompatActivity() {
             textSize = 13f
             setTextColor(Color.BLACK)
             typeface = Typeface.MONOSPACE
-            setPadding(0, 0, 0, 8)
+            setPadding(0, 0, 0, dp(8))
         }
         val stderrLabel = TextView(this).apply {
             text = "stderr"
@@ -332,7 +399,7 @@ class BrowserActivity : AppCompatActivity() {
             textSize = 13f
             setTextColor(Color.BLACK)
             typeface = Typeface.MONOSPACE
-            setPadding(0, 0, 0, 8)
+            setPadding(0, 0, 0, dp(8))
         }
         val resultLabel = TextView(this).apply {
             text = "result"
@@ -343,32 +410,40 @@ class BrowserActivity : AppCompatActivity() {
             textSize = 13f
             setTextColor(Color.BLACK)
             typeface = Typeface.MONOSPACE
-            setPadding(0, 0, 0, 8)
+            setPadding(0, 0, 0, dp(8))
         }
         val copyResultButton = Button(this).apply {
             text = "Copy result"
+        }
+        val copyFullOutputButton = Button(this).apply {
+            text = "Copy full output"
         }
         val commandDetailContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(commandDetailTitle)
             addView(commandDetailView)
+            addView(retryCommandButton, buttonLayoutParams())
             addView(argsTitle)
             addView(argsHintView)
             addView(argsContainer)
             addView(rawJsonToggle)
             addView(rawJsonInput)
-            addView(runButton)
+            addView(runButton, buttonLayoutParams())
             addView(resultTitle)
             addView(resultStatus)
+            addView(resultMeta)
             addView(stdoutLabel)
             addView(stdoutView)
             addView(stderrLabel)
             addView(stderrView)
             addView(resultLabel)
             addView(resultView)
-            addView(copyResultButton)
+            addView(copyResultButton, buttonLayoutParams())
+            addView(copyFullOutputButton, buttonLayoutParams())
         }
 
+        contentLayout.addView(browserTitle)
+        contentLayout.addView(sectionRow)
         contentLayout.addView(capabilitiesView)
         contentLayout.addView(commandsContainer)
         contentLayout.addView(commandDetailContainer)
@@ -391,20 +466,26 @@ class BrowserActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
+            addView(titleView)
             addView(statusView)
             addView(detailsView)
             addView(messageView)
+            addView(buildDivider())
             addView(filesContainer)
+            addView(buildDivider())
             addView(exportsContainer)
-            addView(buttonRow)
-            addView(sectionRow)
+            addView(buildDivider())
+            addView(buttonColumn)
             addView(scrollView)
         }
         setContentView(layout)
+        supportActionBar?.setDisplayHomeAsUpEnabled(true)
+        supportActionBar?.title = "CCC Browser"
 
         val commandDetailViews = CommandDetailViews(
             container = commandDetailContainer,
             detailView = commandDetailView,
+            retryButton = retryCommandButton,
             argsTitle = argsTitle,
             argsHint = argsHintView,
             argsContainer = argsContainer,
@@ -413,14 +494,16 @@ class BrowserActivity : AppCompatActivity() {
             runButton = runButton,
             resultTitle = resultTitle,
             resultStatus = resultStatus,
+            resultMeta = resultMeta,
             stdoutView = stdoutView,
             stderrView = stderrView,
             resultView = resultView,
-            copyResultButton = copyResultButton
+            copyResultButton = copyResultButton,
+            copyFullOutputButton = copyFullOutputButton
         )
 
         reloadButton.setOnClickListener {
-            loadData(statusView, messageView, capabilitiesView, commandsContainer, commandDetailViews)
+            loadData(statusView, messageView, reloadButton, capabilitiesView, commandsContainer, commandDetailViews)
         }
         copyButton.setOnClickListener {
             copyDiagnostics(statusView, detailsView, messageView)
@@ -429,19 +512,43 @@ class BrowserActivity : AppCompatActivity() {
             pickFileLauncher.launch(buildFileMimeTypes())
         }
         uploadButton.setOnClickListener {
-            uploadSelectedFile(fileStatusView, uploadStatusView, importStatusView, uploadButton, importButton)
+            uploadSelectedFile(
+                fileStatusView,
+                uploadStatusView,
+                uploadDetailView,
+                importStatusView,
+                importDetailView,
+                uploadButton,
+                importButton
+            )
         }
         importButton.setOnClickListener {
-            importUploadedFile(importStatusView, importButton)
+            importUploadedFile(importStatusView, importDetailView, importButton)
         }
         exportStlButton.setOnClickListener {
-            requestExport("stl", exportStatusView, exportResultView, exportDownloadButton, exportCopyLinkButton)
+            requestExport(
+                "stl",
+                exportStatusView,
+                exportResultView,
+                exportDownloadButton,
+                exportCopyLinkButton,
+                exportStlButton,
+                exportStepButton
+            )
         }
         exportStepButton.setOnClickListener {
-            requestExport("step", exportStatusView, exportResultView, exportDownloadButton, exportCopyLinkButton)
+            requestExport(
+                "step",
+                exportStatusView,
+                exportResultView,
+                exportDownloadButton,
+                exportCopyLinkButton,
+                exportStlButton,
+                exportStepButton
+            )
         }
         exportDownloadButton.setOnClickListener {
-            downloadExport(exportStatusView)
+            downloadExport(exportStatusView, exportDownloadButton)
         }
         exportCopyLinkButton.setOnClickListener {
             copyExportLink()
@@ -461,17 +568,34 @@ class BrowserActivity : AppCompatActivity() {
         runButton.setOnClickListener {
             runCommand(commandDetailViews)
         }
+        retryCommandButton.setOnClickListener {
+            val name = selectedCommandName ?: selectedCommand?.name
+            if (!name.isNullOrBlank()) {
+                loadCommandDetail(name, commandDetailViews)
+            } else {
+                Toast.makeText(this, "Select a command first.", Toast.LENGTH_SHORT).show()
+            }
+        }
         copyResultButton.setOnClickListener {
             copyExecDiagnostics()
         }
+        copyFullOutputButton.setOnClickListener {
+            copyFullExecOutput()
+        }
 
         updateSectionVisibility(capabilitiesView, commandsContainer, commandDetailContainer, commandDetailView)
-        loadData(statusView, messageView, capabilitiesView, commandsContainer, commandDetailViews)
+        loadData(statusView, messageView, reloadButton, capabilitiesView, commandsContainer, commandDetailViews)
+    }
+
+    override fun onSupportNavigateUp(): Boolean {
+        finish()
+        return true
     }
 
     private fun loadData(
         statusView: TextView,
         messageView: TextView,
+        reloadButton: Button,
         capabilitiesView: TextView,
         commandsContainer: LinearLayout,
         commandDetailViews: CommandDetailViews
@@ -479,6 +603,8 @@ class BrowserActivity : AppCompatActivity() {
         if (loadJob?.isActive == true) {
             return
         }
+        lastAction = "load capabilities"
+        lastActionSummary = "starting"
         statusView.text = "Loading…"
         statusView.setTextColor(Color.GRAY)
         messageView.text = ""
@@ -488,29 +614,38 @@ class BrowserActivity : AppCompatActivity() {
         selectedCommandName = null
         commandDetailViews.detailView.text = ""
         resetExecViews(commandDetailViews)
+        reloadButton.isEnabled = false
         updateSectionVisibility(capabilitiesView, commandsContainer, commandDetailViews.container, commandDetailViews.detailView)
 
         loadJob = lifecycleScope.launch {
             try {
                 val capabilitiesResult = withContext(Dispatchers.IO) { ApiClient.api.capabilities() }
                 val commandsResult = withContext(Dispatchers.IO) { ApiClient.api.commands() }
+                val infoResult = runCatching { withContext(Dispatchers.IO) { ApiClient.api.info() } }.getOrNull()
+                val versionResult = runCatching { withContext(Dispatchers.IO) { ApiClient.api.version() } }.getOrNull()
                 capabilities = capabilitiesResult
                 commands = commandsResult
+                lastInfo = infoResult
+                lastVersion = versionResult
                 statusView.text = "OK"
-                statusView.setTextColor(Color.rgb(46, 125, 50))
+                statusView.setTextColor(colorSuccess)
                 capabilitiesView.text = formatCapabilities(capabilitiesResult)
                 renderCommands(commandsResult, commandsContainer, commandDetailViews)
+                lastActionSummary = "loaded capabilities + commands"
             } catch (e: Exception) {
                 statusView.text = "ERROR"
-                statusView.setTextColor(Color.rgb(198, 40, 40))
-                messageView.text = formatErrorMessage(e)
+                statusView.setTextColor(colorError)
+                val errorMessage = formatErrorMessage(e)
+                messageView.text = errorMessage
                 capabilitiesView.text = "Failed to load capabilities."
                 commandsContainer.removeAllViews()
                 commandsContainer.addView(TextView(this@BrowserActivity).apply {
                     text = "Failed to load commands."
                 })
+                lastActionSummary = "load error: $errorMessage"
             } finally {
                 loadJob = null
+                reloadButton.isEnabled = true
                 updateSectionVisibility(capabilitiesView, commandsContainer, commandDetailViews.container, commandDetailViews.detailView)
             }
         }
@@ -553,7 +688,7 @@ class BrowserActivity : AppCompatActivity() {
                     }
                 }
             }
-            container.addView(button)
+            container.addView(button, buttonLayoutParams())
         }
     }
 
@@ -565,7 +700,10 @@ class BrowserActivity : AppCompatActivity() {
             return
         }
         selectedCommandName = name
+        lastAction = "load command detail"
+        lastActionSummary = "starting"
         commandDetailViews.detailView.text = "Loading command detail…"
+        commandDetailViews.retryButton.visibility = View.GONE
         resetExecViews(commandDetailViews)
         updateSectionVisibility(null, null, commandDetailViews.container, commandDetailViews.detailView)
         commandDetailJob = lifecycleScope.launch {
@@ -574,10 +712,15 @@ class BrowserActivity : AppCompatActivity() {
                 selectedCommand = detail
                 commandDetailViews.detailView.text = formatCommandDetail(detail)
                 renderArgsSchema(commandDetailViews, detail)
+                commandDetailViews.retryButton.visibility = View.GONE
+                lastActionSummary = "loaded command detail for $name"
             } catch (e: Exception) {
                 selectedCommand = null
-                commandDetailViews.detailView.text = "ERROR: ${formatErrorMessage(e)}"
+                val errorMessage = formatErrorMessage(e)
+                commandDetailViews.detailView.text = "ERROR: $errorMessage"
                 renderArgsSchema(commandDetailViews, null)
+                commandDetailViews.retryButton.visibility = View.VISIBLE
+                lastActionSummary = "command detail error: $errorMessage"
             } finally {
                 commandDetailJob = null
                 updateSectionVisibility(null, null, commandDetailViews.container, commandDetailViews.detailView)
@@ -614,7 +757,9 @@ class BrowserActivity : AppCompatActivity() {
         uri: Uri,
         fileStatusView: TextView,
         uploadStatusView: TextView,
+        uploadDetailView: TextView,
         importStatusView: TextView,
+        importDetailView: TextView,
         uploadButton: Button,
         importButton: Button
     ) {
@@ -628,7 +773,10 @@ class BrowserActivity : AppCompatActivity() {
         selectedFile = meta
         fileStatusView.text = buildFileStatusText(meta)
         uploadStatusView.text = "Ready to upload."
+        uploadStatusView.setTextColor(Color.DKGRAY)
+        uploadDetailView.text = ""
         importStatusView.text = ""
+        importDetailView.text = ""
         uploadButton.isEnabled = true
         importButton.isEnabled = false
         lastUploadRequestPayload = null
@@ -673,7 +821,9 @@ class BrowserActivity : AppCompatActivity() {
     private fun uploadSelectedFile(
         fileStatusView: TextView,
         uploadStatusView: TextView,
+        uploadDetailView: TextView,
         importStatusView: TextView,
+        importDetailView: TextView,
         uploadButton: Button,
         importButton: Button
     ) {
@@ -686,8 +836,13 @@ class BrowserActivity : AppCompatActivity() {
             return
         }
         fileStatusView.text = buildFileStatusText(file)
+        lastAction = "upload file"
+        lastActionSummary = "starting"
         uploadStatusView.text = "Uploading…"
+        uploadStatusView.setTextColor(Color.GRAY)
+        uploadDetailView.text = ""
         importStatusView.text = ""
+        importDetailView.text = ""
         uploadButton.isEnabled = false
         importButton.isEnabled = false
         lastUploadRequestPayload = buildUploadRequestSummary(file)
@@ -704,8 +859,11 @@ class BrowserActivity : AppCompatActivity() {
                 lastUploadHttpStatus = "HTTP 200"
                 lastUploadResponse = response
                 lastUploadResponsePayload = uploadResponseAdapter.toJson(response)
-                uploadStatusView.text = buildUploadResultText(response)
+                uploadStatusView.text = "Upload complete"
+                uploadStatusView.setTextColor(colorSuccess)
+                uploadDetailView.text = buildUploadResultText(response)
                 importButton.isEnabled = response.fileId != null || response.path != null
+                lastActionSummary = "upload ok: ${buildUploadResultText(response)}"
             } catch (e: Exception) {
                 val httpException = e as? HttpException
                 val rawBody = httpException?.response()?.errorBody()?.string()
@@ -719,8 +877,11 @@ class BrowserActivity : AppCompatActivity() {
                 lastUploadHttpStatus = if (httpException != null) "HTTP ${httpException.code()}" else "error"
                 lastUploadResponse = null
                 lastUploadResponsePayload = rawBody ?: errorMessage
-                uploadStatusView.text = "Upload failed: $errorMessage"
+                uploadStatusView.text = "Upload failed"
+                uploadStatusView.setTextColor(colorError)
+                uploadDetailView.text = errorMessage
                 importButton.isEnabled = false
+                lastActionSummary = "upload error: $errorMessage"
             } finally {
                 uploadJob = null
                 uploadButton.isEnabled = true
@@ -730,6 +891,7 @@ class BrowserActivity : AppCompatActivity() {
 
     private fun importUploadedFile(
         importStatusView: TextView,
+        importDetailView: TextView,
         importButton: Button
     ) {
         if (importJob?.isActive == true) {
@@ -757,7 +919,11 @@ class BrowserActivity : AppCompatActivity() {
         lastImportRequestPayload = toPrettyJson(requestPayload)
         lastImportResponsePayload = null
         lastImportHttpStatus = null
+        lastAction = "import file"
+        lastActionSummary = "starting"
         importStatusView.text = "Importing…"
+        importStatusView.setTextColor(Color.GRAY)
+        importDetailView.text = ""
         importButton.isEnabled = false
         importJob = lifecycleScope.launch {
             try {
@@ -771,7 +937,10 @@ class BrowserActivity : AppCompatActivity() {
                     !execResponse.status.isNullOrBlank() -> execResponse.status
                     else -> "error"
                 }
-                importStatusView.text = buildImportResultText(statusText, execResponse)
+                importStatusView.text = "Import $statusText"
+                importStatusView.setTextColor(if (execResponse.ok == true) colorSuccess else colorWarning)
+                importDetailView.text = buildImportResultText(statusText, execResponse)
+                lastActionSummary = "import $statusText"
             } catch (e: Exception) {
                 val httpException = e as? HttpException
                 val rawBody = httpException?.response()?.errorBody()?.string()
@@ -784,7 +953,10 @@ class BrowserActivity : AppCompatActivity() {
                 }
                 lastImportHttpStatus = if (httpException != null) "HTTP ${httpException.code()}" else "error"
                 lastImportResponsePayload = rawBody ?: errorMessage
-                importStatusView.text = "Import failed: $errorMessage"
+                importStatusView.text = "Import failed"
+                importStatusView.setTextColor(colorError)
+                importDetailView.text = errorMessage
+                lastActionSummary = "import error: $errorMessage"
             } finally {
                 importJob = null
                 importButton.isEnabled = true
@@ -797,21 +969,28 @@ class BrowserActivity : AppCompatActivity() {
         exportStatusView: TextView,
         exportResultView: TextView,
         downloadButton: Button,
-        copyLinkButton: Button
+        copyLinkButton: Button,
+        exportStlButton: Button,
+        exportStepButton: Button
     ) {
         if (exportJob?.isActive == true) {
             return
         }
         val args = mapOf("format" to format)
+        lastAction = "export $format"
+        lastActionSummary = "starting"
         lastExportRequestPayload = toPrettyJson(mapOf("command" to "export_current_doc", "args" to args))
         lastExportResponsePayload = null
         lastExportHttpStatus = null
         lastExportResponse = null
         lastExportDownloadStatus = null
         exportStatusView.text = "Exporting…"
+        exportStatusView.setTextColor(Color.GRAY)
         exportResultView.text = ""
         downloadButton.isEnabled = false
         copyLinkButton.isEnabled = false
+        exportStlButton.isEnabled = false
+        exportStepButton.isEnabled = false
         exportJob = lifecycleScope.launch {
             try {
                 val execResponse = withContext(Dispatchers.IO) {
@@ -826,10 +1005,12 @@ class BrowserActivity : AppCompatActivity() {
                     execResponseAdapter.toJson(execResponse)
                 }
                 exportStatusView.text = buildExportStatusText(execResponse, exportResponse)
+                exportStatusView.setTextColor(if (execResponse.ok == true || exportResponse?.ok == true) colorSuccess else colorWarning)
                 exportResultView.text = exportResponse?.let { formatExportDetails(it) } ?: "No export payload returned."
                 val hasDownload = !exportResponse?.downloadUrl.isNullOrBlank()
                 downloadButton.isEnabled = hasDownload
                 copyLinkButton.isEnabled = hasDownload
+                lastActionSummary = "export ${format} ok"
             } catch (e: Exception) {
                 val httpException = e as? HttpException
                 val rawBody = httpException?.response()?.errorBody()?.string()
@@ -842,15 +1023,19 @@ class BrowserActivity : AppCompatActivity() {
                 }
                 lastExportHttpStatus = if (httpException != null) "HTTP ${httpException.code()}" else "error"
                 lastExportResponsePayload = rawBody ?: errorMessage
-                exportStatusView.text = "Export failed: $errorMessage"
-                exportResultView.text = ""
+                exportStatusView.text = "Export failed"
+                exportStatusView.setTextColor(colorError)
+                exportResultView.text = errorMessage
+                lastActionSummary = "export error: $errorMessage"
             } finally {
                 exportJob = null
+                exportStlButton.isEnabled = true
+                exportStepButton.isEnabled = true
             }
         }
     }
 
-    private fun downloadExport(exportStatusView: TextView) {
+    private fun downloadExport(exportStatusView: TextView, downloadButton: Button) {
         if (downloadJob?.isActive == true) {
             return
         }
@@ -860,14 +1045,19 @@ class BrowserActivity : AppCompatActivity() {
             Toast.makeText(this, "Export a file before downloading.", Toast.LENGTH_SHORT).show()
             return
         }
+        lastAction = "download export"
+        lastActionSummary = "starting"
         exportStatusView.text = "Downloading…"
+        exportStatusView.setTextColor(Color.GRAY)
         lastExportDownloadStatus = null
+        downloadButton.isEnabled = false
         downloadJob = lifecycleScope.launch {
             try {
                 val savedFile = withContext(Dispatchers.IO) {
                     ApiClient.downloadExport(downloadUrl).use { response ->
                         if (!response.isSuccessful) {
-                            throw IOException("HTTP ${response.code}")
+                            val bodyText = response.body?.string()?.takeIf { it.isNotBlank() } ?: "<no body>"
+                            throw IOException("HTTP ${response.code}: ${truncate(bodyText, 200)}")
                         }
                         val body = response.body ?: throw IOException("empty response body")
                         val targetDir = getExternalFilesDir(null) ?: cacheDir
@@ -883,12 +1073,17 @@ class BrowserActivity : AppCompatActivity() {
                 }
                 lastExportDownloadStatus = "saved=${savedFile.absolutePath}"
                 exportStatusView.text = "Download saved: ${savedFile.absolutePath}"
+                exportStatusView.setTextColor(colorSuccess)
+                lastActionSummary = "download saved: ${savedFile.absolutePath}"
             } catch (e: Exception) {
                 val message = e.message ?: "unknown error"
                 lastExportDownloadStatus = "error=${e.javaClass.simpleName}: $message"
                 exportStatusView.text = "Download failed: ${e.javaClass.simpleName}: $message"
+                exportStatusView.setTextColor(colorError)
+                lastActionSummary = "download error: ${e.javaClass.simpleName}: $message"
             } finally {
                 downloadJob = null
+                downloadButton.isEnabled = true
             }
         }
     }
@@ -938,16 +1133,16 @@ class BrowserActivity : AppCompatActivity() {
             else -> "error"
         }
         val filename = export?.filename ?: "<unknown>"
-        val sizeText = export?.size?.let { NumberFormat.getInstance().format(it) } ?: "<unknown>"
-        return "Export $okText: $filename (${sizeText} bytes)"
+        val sizeText = export?.size?.let { formatSizeKb(it) } ?: "<unknown>"
+        return "Export $okText: $filename (${sizeText})"
     }
 
     private fun formatExportDetails(export: ExportResponse): String {
-        val sizeText = export.size?.let { NumberFormat.getInstance().format(it) } ?: "<unknown>"
+        val sizeText = export.size?.let { formatSizeKb(it) } ?: "<unknown>"
         return buildString {
             appendLine("format: ${export.format ?: "<unknown>"}")
             appendLine("filename: ${export.filename ?: "<unknown>"}")
-            appendLine("size: ${sizeText} bytes")
+            appendLine("size: $sizeText")
             appendLine("created_utc: ${export.createdUtc ?: "<unknown>"}")
             appendLine("download_url: ${export.downloadUrl ?: "<unknown>"}")
         }
@@ -1127,10 +1322,15 @@ class BrowserActivity : AppCompatActivity() {
             val payload = mapOf("command" to commandName, "args" to argsMap)
             toPrettyJson(payload)
         }
+        lastAction = "exec $commandName"
+        lastActionSummary = "starting"
         lastExecRequestPayload = requestPayload
         lastExecResponsePayload = null
         lastExecHttpStatus = null
-        updateExecResultViews(views, null, null, null, "Running…")
+        lastExecStdout = null
+        lastExecStderr = null
+        lastExecDurationMs = null
+        updateExecResultViews(views, null, null, null, "Running…", "ok=<unknown>")
         execJob = lifecycleScope.launch {
             setExecInProgress(views, true)
             try {
@@ -1144,18 +1344,24 @@ class BrowserActivity : AppCompatActivity() {
                 } ?: return@launch
                 lastExecHttpStatus = "HTTP 200"
                 lastExecResponsePayload = truncateJson(execResponseAdapter.toJson(response), 2000)
+                lastExecStdout = response.stdout
+                lastExecStderr = response.stderr
+                lastExecDurationMs = extractDurationMs(response.result)
                 val statusText = when {
                     response.ok == true -> "success"
                     !response.status.isNullOrBlank() -> response.status
                     else -> "error"
                 }
+                val metaLine = buildExecMetaLine(response.ok, response.status, lastExecDurationMs, lastExecHttpStatus)
                 updateExecResultViews(
                     views,
                     response.stdout,
                     response.stderr,
                     response.result,
-                    "Status: $statusText ($lastExecHttpStatus)"
+                    "Status: $statusText",
+                    metaLine
                 )
+                lastActionSummary = "exec $commandName $statusText"
             } catch (e: Exception) {
                 val httpException = e as? HttpException
                 val rawBody = httpException?.response()?.errorBody()?.string()
@@ -1169,13 +1375,18 @@ class BrowserActivity : AppCompatActivity() {
                 val httpStatus = if (httpException != null) "HTTP ${httpException.code()}" else "error"
                 lastExecHttpStatus = httpStatus
                 lastExecResponsePayload = rawBody?.let { truncateJson(it, 2000) } ?: errorMessage
+                lastExecStdout = null
+                lastExecStderr = errorMessage
+                lastExecDurationMs = null
                 updateExecResultViews(
                     views,
                     stdout = null,
                     stderr = errorMessage,
                     result = lastExecResponsePayload,
-                    statusLine = "Status: error ($httpStatus)"
+                    statusLine = "Status: error",
+                    metaLine = buildExecMetaLine(false, "error", lastExecDurationMs, httpStatus)
                 )
+                lastActionSummary = "exec $commandName error: $errorMessage"
             } finally {
                 setExecInProgress(views, false)
             }
@@ -1237,11 +1448,21 @@ class BrowserActivity : AppCompatActivity() {
         stdout: String?,
         stderr: String?,
         result: Any?,
-        statusLine: String
+        statusLine: String,
+        metaLine: String
     ) {
         views.resultStatus.text = statusLine
-        views.stdoutView.text = stdout?.takeIf { it.isNotBlank() } ?: "<none>"
-        views.stderrView.text = stderr?.takeIf { it.isNotBlank() } ?: "<none>"
+        val statusLower = statusLine.lowercase()
+        val statusColor = when {
+            statusLower.contains("running") || statusLower.contains("loading") -> Color.GRAY
+            statusLower.contains("error") -> colorError
+            statusLower.contains("success") || statusLower.contains("ok") -> colorSuccess
+            else -> colorWarning
+        }
+        views.resultStatus.setTextColor(statusColor)
+        views.resultMeta.text = metaLine
+        views.stdoutView.text = truncateOutput(stdout)
+        views.stderrView.text = truncateOutput(stderr)
         views.resultView.text = truncateJson(result?.let { toPrettyJson(it) } ?: "<none>", 2000)
     }
 
@@ -1249,17 +1470,23 @@ class BrowserActivity : AppCompatActivity() {
         views.runButton.isEnabled = !inProgress
         views.rawJsonToggle.isEnabled = !inProgress
         views.rawJsonInput.isEnabled = !inProgress
+        views.copyResultButton.isEnabled = !inProgress
+        views.copyFullOutputButton.isEnabled = !inProgress
         setArgsInputsEnabled(views.argsContainer, !inProgress && !views.rawJsonToggle.isChecked)
     }
 
     private fun resetExecViews(views: CommandDetailViews) {
         views.resultStatus.text = ""
+        views.resultMeta.text = ""
         views.stdoutView.text = ""
         views.stderrView.text = ""
         views.resultView.text = ""
         lastExecRequestPayload = null
         lastExecResponsePayload = null
         lastExecHttpStatus = null
+        lastExecStdout = null
+        lastExecStderr = null
+        lastExecDurationMs = null
     }
 
     private fun setArgsInputsEnabled(container: LinearLayout, enabled: Boolean) {
@@ -1291,6 +1518,9 @@ class BrowserActivity : AppCompatActivity() {
     private fun formatErrorMessage(error: Exception): String {
         return if (error is HttpException) {
             val code = error.code()
+            if (code == 401) {
+                return "Token missing/invalid — set CCC_TOKEN in build config."
+            }
             val rawBody = runCatching { error.response()?.errorBody()?.string() }.getOrNull()
             val bodyText = rawBody?.takeIf { it.isNotBlank() } ?: "<no body>"
             "HTTP $code: ${truncate(bodyText, 200)}"
@@ -1308,6 +1538,40 @@ class BrowserActivity : AppCompatActivity() {
         return truncate(input, maxLength)
     }
 
+    private fun truncateOutput(output: String?): String {
+        val value = output?.takeIf { it.isNotBlank() } ?: "<none>"
+        return if (value.length <= maxSnippetLength) {
+            value
+        } else {
+            value.take(maxSnippetLength) + "… (truncated, use Copy full output)"
+        }
+    }
+
+    private fun buildExecMetaLine(
+        ok: Boolean?,
+        status: String?,
+        durationMs: String?,
+        httpStatus: String?
+    ): String {
+        val okText = ok?.toString() ?: "<unknown>"
+        val statusText = status?.takeIf { it.isNotBlank() } ?: "<none>"
+        val durationText = durationMs ?: "<unknown>"
+        val httpText = httpStatus ?: "<none>"
+        return "ok=$okText status=$statusText duration_ms=$durationText http=$httpText"
+    }
+
+    private fun extractDurationMs(result: Any?): String? {
+        val map = result as? Map<*, *> ?: return null
+        val value = map["duration_ms"] ?: map["durationMs"] ?: return null
+        return value.toString()
+    }
+
+    private fun formatSizeKb(bytes: Long): String {
+        val kb = bytes / 1024.0
+        val formatted = NumberFormat.getNumberInstance().format(kb)
+        return "$formatted KB"
+    }
+
     private fun toPrettyJson(value: Any?): String {
         if (value == null) {
             return "<none>"
@@ -1316,6 +1580,22 @@ class BrowserActivity : AppCompatActivity() {
         val writer = JsonWriter.of(buffer).apply { setIndent("  ") }
         anyAdapter.toJson(writer, value)
         return buffer.readUtf8()
+    }
+
+    private fun formatVersionLine(version: VersionResponse): String {
+        val shaText = version.gitSha?.takeIf { it.isNotBlank() }?.let { " (sha=$it)" } ?: ""
+        return "${version.name} ${version.version}$shaText"
+    }
+
+    private fun formatInfoLines(info: InfoResponse): List<String> {
+        val timeText = info.timeUtc ?: "<unknown>"
+        val auth = info.auth
+        val schemeText = auth?.scheme ?: "unknown"
+        val requiredText = auth?.required?.toString() ?: "unknown"
+        return listOf(
+            "time_utc: $timeText",
+            "auth: $schemeText required=$requiredText"
+        )
     }
 
     private fun buildConnectionDetails(): String {
@@ -1351,6 +1631,13 @@ class BrowserActivity : AppCompatActivity() {
         Toast.makeText(this, "Command exec diagnostics copied to clipboard", Toast.LENGTH_SHORT).show()
     }
 
+    private fun copyFullExecOutput() {
+        val text = buildFullExecOutputText()
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        clipboard.setPrimaryClip(ClipData.newPlainText("CCC Exec Output", text))
+        Toast.makeText(this, "Full exec output copied to clipboard", Toast.LENGTH_SHORT).show()
+    }
+
     private fun buildDiagnosticsText(
         statusView: TextView,
         detailsView: TextView,
@@ -1364,6 +1651,9 @@ class BrowserActivity : AppCompatActivity() {
         val execRequest = lastExecRequestPayload?.let { redactToken(it) } ?: "<none>"
         val execResponse = lastExecResponsePayload ?: "<none>"
         val execStatus = lastExecHttpStatus ?: "<none>"
+        val execDuration = lastExecDurationMs ?: "<unknown>"
+        val execStdout = lastExecStdout ?: "<none>"
+        val execStderr = lastExecStderr ?: "<none>"
         val uploadRequest = lastUploadRequestPayload ?: "<none>"
         val uploadResponse = lastUploadResponsePayload ?: "<none>"
         val uploadStatus = lastUploadHttpStatus ?: "<none>"
@@ -1377,10 +1667,23 @@ class BrowserActivity : AppCompatActivity() {
         val exportSummary = lastExportResponse?.let { formatExportDetails(it).trim() } ?: "<none>"
         val fileSummary = selectedFile?.let { buildFileStatusText(it) } ?: "<none>"
         val messageText = messageView.text?.toString()?.trim().orEmpty()
+        val appVersion = "${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
+        val deviceInfo = "${Build.MANUFACTURER} ${Build.MODEL} (SDK ${Build.VERSION.SDK_INT})"
+        val serverInfo = lastInfo?.let { formatInfoLines(it).joinToString("; ") } ?: "<none>"
+        val serverVersion = lastVersion?.let { formatVersionLine(it) } ?: "<none>"
         return buildString {
             appendLine("CCC browser diagnostics")
             appendLine("timestamp: $timestamp")
             appendLine("status: ${statusView.text}")
+            appendLine("app_version: $appVersion")
+            appendLine("device: $deviceInfo")
+            appendLine()
+            appendLine("last_action: ${lastAction ?: "<none>"}")
+            appendLine("last_action_summary: ${lastActionSummary ?: "<none>"}")
+            appendLine()
+            appendLine("server_info:")
+            appendLine("  info: $serverInfo")
+            appendLine("  version: $serverVersion")
             appendLine()
             appendLine("app_config:")
             detailsView.text?.toString()?.lines()?.forEach { line ->
@@ -1407,10 +1710,15 @@ class BrowserActivity : AppCompatActivity() {
             appendLine("  ${commandJson.replace("\n", "\n  ")}")
             appendLine()
             appendLine("last_exec_status: $execStatus")
+            appendLine("last_exec_duration_ms: $execDuration")
             appendLine("last_exec_request_payload:")
             appendLine("  ${truncateJson(execRequest, 2000).replace("\n", "\n  ")}")
             appendLine("last_exec_response_payload:")
             appendLine("  ${truncateJson(execResponse, 2000).replace("\n", "\n  ")}")
+            appendLine("last_exec_stdout:")
+            appendLine("  ${truncateJson(execStdout, 2000).replace("\n", "\n  ")}")
+            appendLine("last_exec_stderr:")
+            appendLine("  ${truncateJson(execStderr, 2000).replace("\n", "\n  ")}")
             appendLine()
             appendLine("file_selection:")
             appendLine("  ${fileSummary.replace("\n", "\n  ")}")
@@ -1444,11 +1752,13 @@ class BrowserActivity : AppCompatActivity() {
         val request = lastExecRequestPayload?.let { redactToken(it) } ?: "<none>"
         val response = lastExecResponsePayload ?: "<none>"
         val status = lastExecHttpStatus ?: "<none>"
+        val duration = lastExecDurationMs ?: "<unknown>"
         return buildString {
             appendLine("CCC command exec diagnostics")
             appendLine("timestamp: $timestamp")
             appendLine("command: $commandName")
             appendLine("status: $status")
+            appendLine("duration_ms: $duration")
             appendLine()
             appendLine("request_payload:")
             appendLine("  ${truncateJson(request, 2000).replace("\n", "\n  ")}")
@@ -1458,12 +1768,75 @@ class BrowserActivity : AppCompatActivity() {
         }
     }
 
+    private fun buildFullExecOutputText(): String {
+        val timestamp = ZonedDateTime.now().toString()
+        val commandName = selectedCommand?.name ?: selectedCommandName ?: "<none>"
+        val request = lastExecRequestPayload?.let { redactToken(it) } ?: "<none>"
+        val response = lastExecResponsePayload ?: "<none>"
+        val stdout = lastExecStdout ?: "<none>"
+        val stderr = lastExecStderr ?: "<none>"
+        val duration = lastExecDurationMs ?: "<unknown>"
+        return buildString {
+            appendLine("CCC exec full output")
+            appendLine("timestamp: $timestamp")
+            appendLine("command: $commandName")
+            appendLine("status: ${lastExecHttpStatus ?: "<none>"}")
+            appendLine("duration_ms: $duration")
+            appendLine()
+            appendLine("request_payload:")
+            appendLine("  ${request.replace("\n", "\n  ")}")
+            appendLine()
+            appendLine("stdout:")
+            appendLine("  ${stdout.replace("\n", "\n  ")}")
+            appendLine()
+            appendLine("stderr:")
+            appendLine("  ${stderr.replace("\n", "\n  ")}")
+            appendLine()
+            appendLine("response_payload:")
+            appendLine("  ${response.replace("\n", "\n  ")}")
+        }
+    }
+
     private fun redactToken(payload: String): String {
         val token = AppConfig.token
         if (token.isBlank()) {
             return payload
         }
         return payload.replace(token, maskToken(token))
+    }
+
+    private fun dp(value: Int): Int {
+        val density = resources.displayMetrics.density
+        return (value * density).toInt()
+    }
+
+    private fun buttonLayoutParams(): LinearLayout.LayoutParams {
+        return LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        ).apply {
+            bottomMargin = dp(8)
+        }
+    }
+
+    private fun weightedButtonLayoutParams(): LinearLayout.LayoutParams {
+        return LinearLayout.LayoutParams(
+            0,
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            1f
+        ).apply {
+            marginEnd = dp(8)
+        }
+    }
+
+    private fun buildDivider(): View {
+        return View(this).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(1)
+            )
+            setBackgroundColor(Color.LTGRAY)
+        }
     }
 
     private data class SelectedFileInfo(
@@ -1501,6 +1874,7 @@ class BrowserActivity : AppCompatActivity() {
     private data class CommandDetailViews(
         val container: LinearLayout,
         val detailView: TextView,
+        val retryButton: Button,
         val argsTitle: TextView,
         val argsHint: TextView,
         val argsContainer: LinearLayout,
@@ -1509,10 +1883,12 @@ class BrowserActivity : AppCompatActivity() {
         val runButton: Button,
         val resultTitle: TextView,
         val resultStatus: TextView,
+        val resultMeta: TextView,
         val stdoutView: TextView,
         val stderrView: TextView,
         val resultView: TextView,
-        val copyResultButton: Button
+        val copyResultButton: Button,
+        val copyFullOutputButton: Button
     )
 
     private data class ArgInput(
